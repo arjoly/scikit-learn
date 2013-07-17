@@ -94,6 +94,21 @@ cdef class Splitter:
 
     cdef void node_value(self, double* dest)
 
+# =============================================================================
+# Node Storage
+# =============================================================================
+cdef class Storage:
+    cdef Splitter splitter
+    cdef SIZE_t capacity
+    cdef SIZE_t n_outputs
+    cdef SIZE_t* n_classes
+
+    # Methods
+    cdef void resize(self, SIZE_t capacity)
+    cdef void add_node(self, SIZE_t node_id)
+    cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples)
+    cdef np.ndarray toarray(self)
+    cdef void compress(self)
 
 # =============================================================================
 # Tree
@@ -105,7 +120,7 @@ cdef class Tree:
     cdef SIZE_t* n_classes               # Number of classes in y[:, k]
     cdef public SIZE_t n_outputs         # Number of outputs in y
     cdef public SIZE_t max_n_classes     # max(n_classes)
-    cdef public SIZE_t value_stride      # n_outputs * max_n_classes
+
 
     # Parameters
     cdef public Splitter splitter        # Splitting algorithm
@@ -121,9 +136,9 @@ cdef class Tree:
     cdef SIZE_t* children_right          # children_right[i] is the right child of node i
     cdef SIZE_t* feature                 # features[i] is the feature used for splitting node i
     cdef double* threshold               # threshold[i] is the threshold value at node i
-    cdef double* value                   # value[i] is the values contained at node i
     cdef double* impurity                # impurity[i] is the impurity of node i (i.e., the value of the criterion)
     cdef SIZE_t* n_node_samples          # n_node_samples[i] is the number of samples at node i
+    cdef Storage _storage                # Nodes values node[i]
 
     # Methods
     cdef SIZE_t _add_node(self, SIZE_t parent,

@@ -1,3 +1,4 @@
+
 # encoding: utf-8
 # cython: cdivision=True
 # cython: boundscheck=False
@@ -1184,10 +1185,156 @@ cdef class RandomSplitter(Splitter):
         feature[0] = best_feature
         threshold[0] = best_threshold
 
+# =============================================================================
+# Storage
+# =============================================================================
+cdef class Storage:
+
+    # Methods
+    cdef void resize(self, SIZE_t capacity):
+        pass
+
+    cdef void add_node(self, SIZE_t node_id):
+        pass
+
+    cdef np.ndarray node_value(self, SIZE_t* node_id, SIZE_t n_samples):
+        pass
+
+    cdef np.ndarray toarray(self):
+        pass
+
+    cdef void compress(self):
+        pass
+
+
+cdef class DenseStorage(Storage):
+    cdef SIZE_t value_stride
+    cdef SIZE_t max_n_classes
+    cdef double* value
+
+    def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
+                  np.ndarray[SIZE_t, ndim=1] n_classes):
+
+        self.splitter = splitter
+        self.max_n_classes = np.max(n_classes)
+        self.value_stride = self.max_n_classes * n_outputs
+        self.n_outputs = n_outputs
+
+
+        self.n_classes = <SIZE_t*> malloc(n_outputs * sizeof(SIZE_t))
+        if self.n_classes == NULL:
+            raise MemoryError()
+
+        cdef SIZE_t k
+        for k from 0 <= k < n_outputs:
+            self.n_classes[k] = n_classes[k]
+
+        self.value = NULL
+
+    def __dealloc__(self):
+        free(self.value)
+
+    def __reduce__(self):
+        """Reduce re-implementation, for pickling."""
+        return (DenseStorage,
+                (self.splitter,
+                 self.n_outputs,
+                 sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
+                self.__getstate__())
+
+    def __getstate__(self):
+        """Getstate re-implementation, for pickling."""
+        d = {}
+        d["capacity"] = self.capacity
+        d["n_classes"] = sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)
+        d["value"] = double_ptr_to_ndarray(self.value, self.capacity * self.value_stride)
+        return d
+
+    def __setstate__(self, d):
+        """Setstate re-implementation, for unpickling."""
+        self.resize(d["capacity"])
+
+        cdef double* value = <double*> (<np.ndarray> d["value"]).data
+        memcpy(self.value, value, self.capacity * self.value_stride * sizeof(double))
+
+    def __dealloc__(self):
+        """Destructor."""
+        free(self.value)
+        free(self.n_classes)
+
+    cdef void resize(self, int capacity):
+        """Resize all inner arrays to `capacity`."""
+        if capacity == self.capacity:
+            return
+
+        self.capacity = capacity
+
+        cdef double* tmp_value = <double*> realloc(self.value, capacity * self.value_stride * sizeof(double))
+        if tmp_value != NULL:
+            self.value = tmp_value
+
+        if (tmp_value == NULL):
+            raise MemoryError()
+
+    cdef void add_node(self, SIZE_t node_id):
+        self.splitter.node_value(self.value + node_id * self.value_stride)
+
+    cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef double* value = self.value
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        cdef np.ndarray[np.float64_t, ndim=2] out
+        cdef np.ndarray[np.float64_t, ndim=3] out_multi
+
+        if self.n_outputs == 1:
+            out = np.zeros((n_samples, max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                offset = node_ids[i] * value_stride
+
+                for c from 0 <= c < n_classes[0]:
+                    out[i, c] = value[offset + c]
+
+            return out
+
+        else: # n_outputs > 1
+            out_multi = np.zeros((n_samples,
+                                  n_outputs,
+                                  max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                offset = node_ids[i] * value_stride
+
+                for k from 0 <= k < n_outputs:
+                    for c from 0 <= c < n_classes[k]:
+                        out_multi[i, k, c] = value[offset + c]
+                    offset += max_n_classes
+
+            return out_multi
+
+    cdef np.ndarray toarray(self):
+        cdef np.npy_intp shape[3]
+
+        shape[0] = <np.npy_intp> self.capacity
+        shape[1] = <np.npy_intp> self.n_outputs
+        shape[2] = <np.npy_intp> self.max_n_classes
+
+        return np.PyArray_SimpleNewFromData(
+            3, shape, np.NPY_DOUBLE, self.value)
 
 # =============================================================================
 # Tree
 # =============================================================================
+
+
 
 cdef class Tree:
     # Wrap for outside world
@@ -1213,14 +1360,7 @@ cdef class Tree:
 
     property value:
         def __get__(self):
-            cdef np.npy_intp shape[3]
-
-            shape[0] = <np.npy_intp> self.node_count
-            shape[1] = <np.npy_intp> self.n_outputs
-            shape[2] = <np.npy_intp> self.max_n_classes
-
-            return np.PyArray_SimpleNewFromData(
-                3, shape, np.NPY_DOUBLE, self.value)
+            return self._storage.toarray()
 
     property impurity:
         def __get__(self):
@@ -1244,7 +1384,6 @@ cdef class Tree:
             raise MemoryError()
 
         self.max_n_classes = np.max(n_classes)
-        self.value_stride = self.n_outputs * self.max_n_classes
 
         cdef SIZE_t k
 
@@ -1265,9 +1404,10 @@ cdef class Tree:
         self.children_right = NULL
         self.feature = NULL
         self.threshold = NULL
-        self.value = NULL
         self.impurity = NULL
         self.n_node_samples = NULL
+
+        self._storage = DenseStorage(self.splitter, n_outputs, n_classes)
 
     def __dealloc__(self):
         """Destructor."""
@@ -1277,7 +1417,6 @@ cdef class Tree:
         free(self.children_right)
         free(self.feature)
         free(self.threshold)
-        free(self.value)
         free(self.impurity)
         free(self.n_node_samples)
 
@@ -1302,9 +1441,9 @@ cdef class Tree:
         d["children_right"] = sizet_ptr_to_ndarray(self.children_right, self.capacity)
         d["feature"] = sizet_ptr_to_ndarray(self.feature, self.capacity)
         d["threshold"] = double_ptr_to_ndarray(self.threshold, self.capacity)
-        d["value"] = double_ptr_to_ndarray(self.value, self.capacity * self.value_stride)
         d["impurity"] = double_ptr_to_ndarray(self.impurity, self.capacity)
         d["n_node_samples"] = sizet_ptr_to_ndarray(self.n_node_samples, self.capacity)
+        d["_storage"] = self._storage
 
         return d
 
@@ -1312,12 +1451,12 @@ cdef class Tree:
         """Setstate re-implementation, for unpickling."""
         self._resize(d["capacity"])
         self.node_count = d["node_count"]
+        self._storage = d["_storage"]
 
         cdef SIZE_t* children_left = <SIZE_t*> (<np.ndarray> d["children_left"]).data
         cdef SIZE_t* children_right =  <SIZE_t*> (<np.ndarray> d["children_right"]).data
         cdef SIZE_t* feature = <SIZE_t*> (<np.ndarray> d["feature"]).data
         cdef double* threshold = <double*> (<np.ndarray> d["threshold"]).data
-        cdef double* value = <double*> (<np.ndarray> d["value"]).data
         cdef double* impurity = <double*> (<np.ndarray> d["impurity"]).data
         cdef SIZE_t* n_node_samples = <SIZE_t*> (<np.ndarray> d["n_node_samples"]).data
 
@@ -1325,7 +1464,6 @@ cdef class Tree:
         memcpy(self.children_right, children_right, self.capacity * sizeof(SIZE_t))
         memcpy(self.feature, feature, self.capacity * sizeof(SIZE_t))
         memcpy(self.threshold, threshold, self.capacity * sizeof(double))
-        memcpy(self.value, value, self.capacity * self.value_stride * sizeof(double))
         memcpy(self.impurity, impurity, self.capacity * sizeof(double))
         memcpy(self.n_node_samples, n_node_samples, self.capacity * sizeof(SIZE_t))
 
@@ -1359,9 +1497,7 @@ cdef class Tree:
         if tmp_threshold != NULL:
             self.threshold = tmp_threshold
 
-        cdef double* tmp_value = <double*> realloc(self.value, capacity * self.value_stride * sizeof(double))
-        if tmp_value != NULL:
-            self.value = tmp_value
+        self._storage.resize(capacity)
 
         cdef double* tmp_impurity = <double*> realloc(self.impurity, capacity * sizeof(double))
         if tmp_impurity != NULL:
@@ -1375,7 +1511,6 @@ cdef class Tree:
             (tmp_children_right == NULL) or
             (tmp_feature == NULL) or
             (tmp_threshold == NULL) or
-            (tmp_value == NULL) or
             (tmp_impurity == NULL) or
             (tmp_n_node_samples == NULL)):
             raise MemoryError()
@@ -1506,7 +1641,7 @@ cdef class Tree:
 
             if is_leaf:
                 # Don't store value for internal nodes
-                splitter.node_value(self.value + node_id * self.value_stride)
+                self._storage.add_node(node_id)
 
             else:
                 if stack_n_values + 10 > stack_capacity:
@@ -1538,13 +1673,12 @@ cdef class Tree:
         cdef SIZE_t* children_right = self.children_right
         cdef SIZE_t* feature = self.feature
         cdef double* threshold = self.threshold
-        cdef double* value = self.value
+        cdef Storage storage = self._storage
 
         cdef SIZE_t n_samples = X.shape[0]
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t max_n_classes = self.max_n_classes
-        cdef SIZE_t value_stride = self.value_stride
 
         cdef SIZE_t node_id = 0
         cdef SIZE_t offset
@@ -1555,51 +1689,29 @@ cdef class Tree:
         cdef np.ndarray[np.float64_t, ndim=2] out
         cdef np.ndarray[np.float64_t, ndim=3] out_multi
 
+        cdef SIZE_t* node_ids = <SIZE_t*> malloc(n_samples * sizeof(SIZE_t))
+
+        for i from 0 <= i < n_samples:
+            # While node_id not a leaf
+            node_id = 0
+            while children_left[node_id] != _TREE_LEAF:
+                # ... and children_right[node_id] != _TREE_LEAF:
+                if X[i, feature[node_id]] <= threshold[node_id]:
+                    node_id = children_left[node_id]
+                else:
+                    node_id = children_right[node_id]
+            node_ids[i] = node_id
+
+
         if n_outputs == 1:
-            out = np.zeros((n_samples, max_n_classes), dtype=np.float64)
-
-            for i from 0 <= i < n_samples:
-                node_id = 0
-
-                # While node_id not a leaf
-                while children_left[node_id] != _TREE_LEAF:
-                    # ... and children_right[node_id] != _TREE_LEAF:
-                    if X[i, feature[node_id]] <= threshold[node_id]:
-                        node_id = children_left[node_id]
-                    else:
-                        node_id = children_right[node_id]
-
-                offset = node_id * value_stride
-
-                for c from 0 <= c < n_classes[0]:
-                    out[i, c] = value[offset + c]
-
+            out = storage.node_value(node_ids, n_samples)
+            free(node_ids)
             return out
-
-        else: # n_outputs > 1
-            out_multi = np.zeros((n_samples,
-                                  n_outputs,
-                                  max_n_classes), dtype=np.float64)
-
-            for i from 0 <= i < n_samples:
-                node_id = 0
-
-                # While node_id not a leaf
-                while children_left[node_id] != _TREE_LEAF:
-                    # ... and children_right[node_id] != _TREE_LEAF:
-                    if X[i, feature[node_id]] <= threshold[node_id]:
-                        node_id = children_left[node_id]
-                    else:
-                        node_id = children_right[node_id]
-
-                offset = node_id * value_stride
-
-                for k from 0 <= k < n_outputs:
-                    for c from 0 <= c < n_classes[k]:
-                        out_multi[i, k, c] = value[offset + c]
-                    offset += max_n_classes
-
+        else:
+            out_multi = storage.node_value(node_ids, n_samples)
+            free(node_ids)
             return out_multi
+
 
     cpdef apply(self, np.ndarray[DTYPE_t, ndim=2] X):
         """Finds the terminal region (=leaf node) for each sample in X."""
