@@ -1356,7 +1356,8 @@ cdef class SparseCSRStorage(Storage):
 
     cdef double* value_buffer  # Buffer to pass value
 
-    # TODO use scipy sparse convention for names
+    # TODO check that we indptr of size capacity + 1
+
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
 
@@ -1435,7 +1436,7 @@ cdef class SparseCSRStorage(Storage):
     cdef void resize(self, SIZE_t capacity):
         """Resize storage to at capacity node"""
         if capacity + 1 == self.capacity:
-            self.resize_nnz(self.indptr[node_count + 1])
+            self.resize_nnz(self.indptr[self.node_count + 1])
             return
 
         cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, (capacity + 1) * sizeof(SIZE_t))
@@ -1459,21 +1460,30 @@ cdef class SparseCSRStorage(Storage):
         cdef SIZE_t max_n_classes = self.max_n_classes
 
         cdef double* value_buffer = self.value_buffer
-        cdef SIZE_t value_stride = self.value_stride
 
         cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t node_count = self.node_count
         cdef SIZE_t* indices = self.indices
         cdef double* data = self.data
 
+        cdef SIZE_t n_non_zeros = indptr[node_count]
         cdef SIZE_t k
         cdef SIZE_t c
+        cdef SIZE_t n
         cdef SIZE_t offset = 0
 
         self.splitter.node_value(value_buffer)
 
         # Check that we have enough rooms for the new value
-        if n_non_zeros + value_stride > self.capacity_nnz:
+        if n_non_zeros + self.value_stride > self.capacity_nnz:
             self.resize_nnz(-1)
+
+        # Extend indptr
+        if (node_id < node_count):
+            raise ValueError("node_id should be greater than node_count")
+
+        for n from node_count < n <= node_id:
+            indptr[n] = n_non_zeros
 
         # Store only non zero element
         for k from 0 <= k < n_outputs:
@@ -1485,15 +1495,74 @@ cdef class SparseCSRStorage(Storage):
 
             offset += max_n_classes
 
-        # Update constant
-        self.n_non_zeros = n_non_zeros
+        # Update range
+        indptr[node_id + 1] = n_non_zeros
 
 
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
-        pass
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices = self.indices
+        cdef double* data = self.data
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t c
+        cdef SIZE_t j
+
+        cdef np.ndarray[np.float64_t, ndim=2] out
+        cdef np.ndarray[np.float64_t, ndim=3] out_multi
+
+        if self.n_outputs == 1:
+            out = np.zeros((n_samples, max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                for j from indptr[node_ids[i]] <= j < indptr[node_ids[i] + 1]:
+                    c = indices[j] % max_n_classes
+                    out[i, c] = data[j]
+
+            return out
+
+        else: # n_outputs > 1
+            out_multi = np.zeros((n_samples,
+                                  n_outputs,
+                                  max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                for j from indptr[node_ids[i]] <= j < indptr[node_ids[i] + 1]:
+                    c = indices[j] % max_n_classes
+                    k = indices[j] / max_n_classes
+                    out_multi[i, k, c] = data[j]
+
+            return out_multi
 
     cdef np.ndarray toarray(self):
-        pass
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices = self.indices
+        cdef double* data = self.data
+        cdef SIZE_t capacity = self.capacity
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t j
+
+        cdef np.ndarray[np.float64_t, ndim=3] out
+        out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
+
+        for i from 0 <= i < capacity:
+            for j from indptr[j] <= j < indptr[j + 1]:
+                c = indices[j] % max_n_classes
+                k = indices[j] / max_n_classes
+                out[i, k, c] = data[j]
+
+        return out
 
 
 # =============================================================================
@@ -1570,7 +1639,7 @@ cdef class Tree:
         self.impurity = NULL
         self.n_node_samples = NULL
 
-        self._storage = DenseStorage(self.splitter, n_outputs, n_classes)
+        self._storage = SparseCSRStorage(self.splitter, n_outputs, n_classes)
 
     def __dealloc__(self):
         """Destructor."""
