@@ -1356,7 +1356,7 @@ cdef class SparseCSRStorage(Storage):
 
     cdef double* value_buffer  # Buffer to pass value
 
-    # TODO check that we indptr of size capacity + 1
+    # TODO check that indptr has correct shape
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
@@ -1415,7 +1415,7 @@ cdef class SparseCSRStorage(Storage):
 
         if capacity_nnz < 0:
             if self.capacity_nnz <= 0:
-                capacity_nnz = 3 # default initial value
+                capacity_nnz = self.value_stride # default initial value
             else:
                 capacity_nnz = 2 * self.capacity_nnz
 
