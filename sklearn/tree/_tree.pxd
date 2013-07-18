@@ -94,6 +94,7 @@ cdef class Splitter:
 
     cdef void node_value(self, double* dest)
 
+
 # =============================================================================
 # Node Storage
 # =============================================================================
@@ -102,13 +103,14 @@ cdef class Storage:
     cdef SIZE_t capacity
     cdef SIZE_t n_outputs
     cdef SIZE_t* n_classes
+    cdef SIZE_t max_n_classes
+    cdef SIZE_t value_stride
 
     # Methods
     cdef void resize(self, SIZE_t capacity)
     cdef void add_node(self, SIZE_t node_id)
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples)
     cdef np.ndarray toarray(self)
-    cdef void compress(self)
 
 # =============================================================================
 # Tree

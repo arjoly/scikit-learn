@@ -1203,13 +1203,8 @@ cdef class Storage:
     cdef np.ndarray toarray(self):
         pass
 
-    cdef void compress(self):
-        pass
-
 
 cdef class DenseStorage(Storage):
-    cdef SIZE_t value_stride
-    cdef SIZE_t max_n_classes
     cdef double* value
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
@@ -1219,7 +1214,6 @@ cdef class DenseStorage(Storage):
         self.max_n_classes = np.max(n_classes)
         self.value_stride = self.max_n_classes * n_outputs
         self.n_outputs = n_outputs
-
 
         self.n_classes = <SIZE_t*> malloc(n_outputs * sizeof(SIZE_t))
         if self.n_classes == NULL:
@@ -1232,7 +1226,9 @@ cdef class DenseStorage(Storage):
         self.value = NULL
 
     def __dealloc__(self):
+        """Destructor."""
         free(self.value)
+        free(self.n_classes)
 
     def __reduce__(self):
         """Reduce re-implementation, for pickling."""
@@ -1257,12 +1253,8 @@ cdef class DenseStorage(Storage):
         cdef double* value = <double*> (<np.ndarray> d["value"]).data
         memcpy(self.value, value, self.capacity * self.value_stride * sizeof(double))
 
-    def __dealloc__(self):
-        """Destructor."""
-        free(self.value)
-        free(self.n_classes)
 
-    cdef void resize(self, int capacity):
+    cdef void resize(self, SIZE_t capacity):
         """Resize all inner arrays to `capacity`."""
         if capacity == self.capacity:
             return
@@ -1330,12 +1322,135 @@ cdef class DenseStorage(Storage):
         return np.PyArray_SimpleNewFromData(
             3, shape, np.NPY_DOUBLE, self.value)
 
+
+# cdef class SparseCSRStorage(Storage):
+#     cdef SIZE_t capacity_nnz
+#     cdef double* value  # Value
+#     cdef SIZE_t* row_ptr  # idx point to col_ptr and value
+#     cdef SIZE_t* col # col idx if sparse row
+#     cdef double* value_buffer  # Value
+
+#     # TODO use scipy sparse convention for names
+
+#     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
+#                   np.ndarray[SIZE_t, ndim=1] n_classes):
+
+#         self.splitter = splitter
+#         self.max_n_classes = np.max(n_classes)
+#         self.value_stride = self.max_n_classes * n_outputs
+#         self.n_outputs = n_outputs
+
+#         self.n_classes = <SIZE_t*> malloc(n_outputs * sizeof(SIZE_t))
+#         if self.n_classes == NULL:
+#             raise MemoryError()
+
+#         cdef SIZE_t k
+#         for k from 0 <= k < n_outputs:
+#             self.n_classes[k] = n_classes[k]
+
+#         self.capacity_value = 0
+
+#         # Storage structure
+#         self.value = NULL
+#         self.row_ptr = NULL
+#         self.col = NULL
+#         self.value_buffer = NULL
+
+#     def __dealloc__(self):
+#         free(self.value)
+#         free(self.row_ptr)
+#         free(self.col)
+
+#     def __reduce__(self):
+#         """Reduce re-implementation, for pickling."""
+#         return (SparseCSRStorage,
+#                 (self.splitter,
+#                  self.n_outputs,
+#                  sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
+#                 self.__getstate__())
+
+#     def __getstate__(self):
+#         """Getstate re-implementation, for pickling."""
+#         cdef SIZE_t capacity = self.capacity
+
+#         d = {}
+#         d["capacity"] = capacity
+#         d["row_ptr"] = sizet_ptr_to_ndarray(self.row_ptr, capacity)
+#         d["col"] = sizet_ptr_to_ndarray(self.col, self.row_ptr[capacity])
+#         d["value"] = double_ptr_to_ndarray(self.value, self.row_ptr[capacity])
+#         return d
+
+#     def __setstate__(self, d):
+#         """Setstate re-implementation, for unpickling."""
+#         self.resize(d["capacity"])
+
+#         cdef SIZE_t capacity = d["capacity"]
+
+#         cdef SIZE_t* row_ptr = <SIZE_t*> (<np.ndarray> d["row_ptr"]).data
+#         memcpy(self.row_ptr, row_ptr, capacity * sizeof(SIZE_t))
+
+#         cdef SIZE_t* col = <double*> (<np.ndarray> d["col"]).data
+#         memcpy(self.value, value, self.row_ptr[capacity] * sizeof(SIZE_t))
+
+#         cdef double* value = <double*> (<np.ndarray> d["value"]).data
+#         memcpy(self.value, value, self.row_ptr[capacity] * sizeof(double))
+
+#     cdef void _resize(self, SIZE_t capacity_nnz)
+#         """Resize storage of non zero element. If capacity_nnz < 0,
+#         capacity_nnz is doubled.
+#         """
+#         if capacity_nnz == self.capacity:
+#             return
+
+#         if capacity_nnz < 0:
+#             if self.capacity_nnz <= 0:
+#                 capacity_nnz = 3 # default initial value
+#             else:
+#                 capacity_nnz = 2 * self.capacity_nnz
+
+#         self.capacity_nnz = capacity_nnz
+
+#         cdef double* tmp_col = <double*> realloc(self.col, capacity_nnz * sizeof(SIZE_t))
+#         if tmp_col_ptr != NULL:
+#             self.col = tmp_col_ptr
+
+#         cdef double* tmp_value = <double*> realloc(self.value, capacity_nnz  * sizeof(double))
+#         if tmp_value != NULL:
+#             self.value = tmp_value
+
+#         if ((tmp_col_ptr == NULL) or
+#             (tmp_value == NULL)):
+#             raise MemoryError()
+
+#     cdef void resize(self, SIZE_t capacity):
+#         """Resize all inner arrays to `capacity`."""
+#         if capacity == self.capacity:
+#             self._resize(self.row_ptr[capacity + 1])
+#             return
+
+#         self.capacity = capacity
+
+#         cdef double* tmp_row_ptr = <double*> realloc(self.row_ptr, (capacity + 1) * sizeof(SIZE_t))
+#         if tmp_row_ptr != NULL:
+#             self.tmp_row_ptr = tmp_row_ptr
+
+#         if (tmp_value == NULL):
+#             raise MemoryError()
+
+#     cdef void add_node(self, SIZE_t node_id):
+#         pass
+#         # self.splitter.node_value(self.value + node_id * self.value_stride)
+
+#     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
+#         pass
+
+#     cdef np.ndarray toarray(self):
+#         pass
+
+
 # =============================================================================
 # Tree
 # =============================================================================
-
-
-
 cdef class Tree:
     # Wrap for outside world
     property n_classes:
