@@ -24,7 +24,7 @@ from ..feature_selection.from_model import _LearntSelectorMixin
 from ..utils import array2d, check_random_state
 from ..utils.validation import check_arrays
 
-from ._tree import Criterion, Splitter, Tree
+from ._tree import Criterion, Splitter, Tree, Storage
 from . import _tree
 
 
@@ -44,12 +44,13 @@ DOUBLE = _tree.DOUBLE
 CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
 CRITERIA_REG = {"mse": _tree.MSE}
 SPLITTERS = {"best": _tree.BestSplitter, "random": _tree.RandomSplitter}
+NODE_STORAGE = {"sparse_csr": _tree.SparseCSRStorage,
+                "dense": _tree.DenseStorage}
 
 
 # =============================================================================
 # Base decision tree
 # =============================================================================
-
 class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                                           _LearntSelectorMixin)):
     """Base class for decision trees.
@@ -62,6 +63,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
     def __init__(self,
                  criterion,
                  splitter,
+                 storage,
                  max_depth,
                  min_samples_split,
                  min_samples_leaf,
@@ -69,6 +71,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                  random_state):
         self.criterion = criterion
         self.splitter = splitter
+        self.storage = storage
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
@@ -84,7 +87,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.tree_ = None
 
     def fit(self, X, y, sample_mask=None, X_argsorted=None,
-                  check_input=True, sample_weight=None):
+            check_input=True, sample_weight=None):
         """Build a decision tree from the training set (X, y).
 
         Parameters
@@ -233,11 +236,17 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                                                 max_features,
                                                 self.min_samples_leaf,
                                                 random_state)
+        storage = self.storage
+        if not isinstance(self.storage, Storage):
+            storage = NODE_STORAGE[self.storage](splitter,
+                                                 self.n_outputs_,
+                                                 self.n_classes_)
 
         self.criterion_ = criterion
         self.splitter_ = splitter
+        self.storage_ = storage
         self.tree_ = Tree(self.n_features_, self.n_classes_,
-                          self.n_outputs_, splitter, max_depth,
+                          self.n_outputs_, splitter, storage, max_depth,
                           min_samples_split, self.min_samples_leaf,
                           random_state)
 
@@ -421,6 +430,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
     def __init__(self,
                  criterion="gini",
                  splitter="best",
+                 storage="dense",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -430,6 +440,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                  compute_importances=None):
         super(DecisionTreeClassifier, self).__init__(criterion,
                                                      splitter,
+                                                     storage,
                                                      max_depth,
                                                      min_samples_split,
                                                      min_samples_leaf,
@@ -612,6 +623,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     def __init__(self,
                  criterion="mse",
                  splitter="best",
+                 storage="dense",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -621,6 +633,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
                  compute_importances=None):
         super(DecisionTreeRegressor, self).__init__(criterion,
                                                     splitter,
+                                                    storage,
                                                     max_depth,
                                                     min_samples_split,
                                                     min_samples_leaf,
@@ -663,6 +676,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
     def __init__(self,
                  criterion="gini",
                  splitter="random",
+                 storage="dense",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -672,6 +686,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
                  compute_importances=None):
         super(ExtraTreeClassifier, self).__init__(criterion,
                                                   splitter,
+                                                  storage,
                                                   max_depth,
                                                   min_samples_split,
                                                   min_samples_leaf,
@@ -714,6 +729,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
     def __init__(self,
                  criterion="mse",
                  splitter="random",
+                 storage="dense",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -723,6 +739,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
                  compute_importances=None):
         super(ExtraTreeRegressor, self).__init__(criterion,
                                                  splitter,
+                                                 storage,
                                                  max_depth,
                                                  min_samples_split,
                                                  min_samples_leaf,

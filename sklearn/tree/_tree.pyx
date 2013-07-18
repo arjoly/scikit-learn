@@ -1479,6 +1479,7 @@ cdef class SparseCSRStorage(Storage):
             self.resize_nnz(-1)
 
         # Extend indptr
+        # TODO disable for speed
         if (node_id < node_count):
             raise ValueError("node_id should be greater than node_count")
 
@@ -1603,7 +1604,8 @@ cdef class Tree:
             return sizet_ptr_to_ndarray(self.n_node_samples, self.node_count)
 
     def __cinit__(self, int n_features, np.ndarray[SIZE_t, ndim=1] n_classes,
-                        int n_outputs, Splitter splitter, SIZE_t max_depth,
+                        int n_outputs, Splitter splitter,
+                        Storage storage, SIZE_t max_depth,
                         SIZE_t min_samples_split, SIZE_t min_samples_leaf,
                         object random_state):
         """Constructor."""
@@ -1624,6 +1626,7 @@ cdef class Tree:
 
         # Parameters
         self.splitter = splitter
+        self._storage = storage
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
@@ -1639,7 +1642,7 @@ cdef class Tree:
         self.impurity = NULL
         self.n_node_samples = NULL
 
-        self._storage = SparseCSRStorage(self.splitter, n_outputs, n_classes)
+
 
     def __dealloc__(self):
         """Destructor."""
@@ -1658,6 +1661,7 @@ cdef class Tree:
                        sizet_ptr_to_ndarray(self.n_classes, self.n_outputs),
                        self.n_outputs,
                        self.splitter,
+                       self._storage,
                        self.max_depth,
                        self.min_samples_split,
                        self.min_samples_leaf,
