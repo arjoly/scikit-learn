@@ -1190,6 +1190,46 @@ cdef class RandomSplitter(Splitter):
 # =============================================================================
 cdef class Storage:
 
+    def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
+                  np.ndarray[SIZE_t, ndim=1] n_classes):
+
+        self.splitter = splitter
+        self.max_n_classes = np.max(n_classes)
+        self.value_stride = self.max_n_classes * n_outputs
+        self.n_outputs = n_outputs
+
+        self.n_classes = <SIZE_t*> malloc(n_outputs * sizeof(SIZE_t))
+        if self.n_classes == NULL:
+            raise MemoryError()
+
+        cdef SIZE_t k
+        for k from 0 <= k < n_outputs:
+            self.n_classes[k] = n_classes[k]
+
+    def __dealloc__(self):
+        """Destructor."""
+        free(self.n_classes)
+
+    def __reduce__(self):
+        """Reduce re-implementation, for pickling."""
+        return (Storage,
+                (self.splitter,
+                 self.n_outputs,
+                 sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
+                self.__getstate__())
+
+    def __getstate__(self):
+        """Getstate re-implementation, for pickling."""
+        d = {}
+        d["capacity"] = self.capacity
+        return d
+
+    def __setstate__(self, d):
+        """Setstate re-implementation, for unpickling."""
+        self.resize(d["capacity"])
+        self.capacity = d["capacity"]
+
+
     # Methods
     cdef void resize(self, SIZE_t capacity):
         pass
@@ -1209,26 +1249,11 @@ cdef class DenseStorage(Storage):
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
-
-        self.splitter = splitter
-        self.max_n_classes = np.max(n_classes)
-        self.value_stride = self.max_n_classes * n_outputs
-        self.n_outputs = n_outputs
-
-        self.n_classes = <SIZE_t*> malloc(n_outputs * sizeof(SIZE_t))
-        if self.n_classes == NULL:
-            raise MemoryError()
-
-        cdef SIZE_t k
-        for k from 0 <= k < n_outputs:
-            self.n_classes[k] = n_classes[k]
-
         self.value = NULL
 
     def __dealloc__(self):
         """Destructor."""
         free(self.value)
-        free(self.n_classes)
 
     def __reduce__(self):
         """Reduce re-implementation, for pickling."""
@@ -1240,15 +1265,13 @@ cdef class DenseStorage(Storage):
 
     def __getstate__(self):
         """Getstate re-implementation, for pickling."""
-        d = {}
-        d["capacity"] = self.capacity
-        d["n_classes"] = sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)
+        d = super(DenseStorage, self).__getstate__()
         d["value"] = double_ptr_to_ndarray(self.value, self.capacity * self.value_stride)
         return d
 
     def __setstate__(self, d):
         """Setstate re-implementation, for unpickling."""
-        self.resize(d["capacity"])
+        super(DenseStorage, self).__setstate__(d)
 
         cdef double* value = <double*> (<np.ndarray> d["value"]).data
         memcpy(self.value, value, self.capacity * self.value_stride * sizeof(double))
