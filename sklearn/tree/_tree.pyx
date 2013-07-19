@@ -1671,8 +1671,9 @@ cdef class CompressedStorage(Storage):
         super(CompressedStorage, self).__setstate__(d)
 
         self.resize_data(d["capacity_data"])
-        self.capacity_data = d["capacity_data"]
         self.resize_indices(d["capacity_indices"])
+
+        self.capacity_data = d["capacity_data"]
         self.capacity_indices = d["capacity_indices"]
         self.node_count = d["node_count"]
 
@@ -1805,7 +1806,7 @@ cdef class CompressedStorage(Storage):
         #       unbalanced number of classed or only binary classes
         cdef SIZE_t counter = 0
         for k from 0 <= k < value_stride:
-            if value_buffer[k] != 0:
+            if value_buffer[k] != 0.:
                 counter += 1
 
         if 2 * counter < value_stride:
@@ -1826,10 +1827,7 @@ cdef class CompressedStorage(Storage):
 
                 offset += max_n_classes
         else:
-            offset = 0
-            for k from 0 <= k < value_stride:
-                data[n_data + k] = value_buffer[k]
-
+            self.splitter.node_value(data + n_data)
             n_data += value_stride
 
         # Update range
@@ -1853,8 +1851,9 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t k
         cdef SIZE_t c
         cdef SIZE_t j
-        cdef SIZE_t offset_indices
+        cdef SIZE_t offset_indices_ptr
         cdef SIZE_t offset_indptr
+        cdef SIZE_t node_id
 
         cdef np.ndarray[np.float64_t, ndim=2] out
         cdef np.ndarray[np.float64_t, ndim=3] out_multi
@@ -1863,19 +1862,19 @@ cdef class CompressedStorage(Storage):
             out = np.zeros((n_samples, max_n_classes), dtype=np.float64)
 
             for i from 0 <= i < n_samples:
-                if (value_stride == (indptr[node_ids[i + 1]]) -
-                                     indptr[node_ids[i]]):
+                node_id = node_ids[i]
+                offset_indices_ptr = indices_ptr[node_id]
+                offset_indptr = indptr[node_id]
+
+                if (value_stride == (indptr[node_id + 1] - offset_indptr)):
                     # Dense node
-                    offset_indptr = indptr[node_ids[i]]
-                    for c from 0 <= c < n_classes[0]:
-                        out[i, c] = data[offset_indptr + c]
+                    for j from 0 <= j < n_classes[0]:
+                        out[i, j] = data[offset_indptr + j]
 
                 else:
                     # Sparse node
-                    offset_indices = indices_ptr[node_ids[i]]
-                    offset_indptr = indptr[node_ids[i]]
-                    for j from 0 <= j < (indptr[node_ids[i] + 1] - indptr[node_ids[i]]):
-                        c = indices[offset_indices + j]
+                    for j from 0 <= j < (indptr[node_id + 1] - offset_indptr):
+                        c = indices[offset_indices_ptr + j]
                         out[i, c] = data[offset_indptr + j]
             return out
 
@@ -1885,24 +1884,24 @@ cdef class CompressedStorage(Storage):
                                   max_n_classes), dtype=np.float64)
 
             for i from 0 <= i < n_samples:
-                if (value_stride == (indptr[node_ids[i + 1]]) -
-                                     indptr[node_ids[i]]):
-                    offset_indptr = indptr[node_ids[i]]
-
+                node_id = node_ids[i]
+                offset_indices_ptr = indices_ptr[node_id]
+                offset_indptr = indptr[node_id]
+                if (value_stride == (indptr[node_id + 1] - offset_indptr)):
                     # Dense node
                     for k from 0 <= k < n_outputs:
                         for c from 0 <= c < n_classes[k]:
                             out_multi[i, k, c] = data[offset_indptr + c]
+                        offset_indptr += max_n_classes
 
                 else:
                     # Sparse node
-                    offset_indices = indices_ptr[node_ids[i]]
-                    offset_indptr = indptr[node_ids[i]]
-                    for j from 0 <= j < (indptr[node_ids[i] + 1] - indptr[node_ids[i]]):
-                        c = indices[offset_indices + j] % max_n_classes
-                        k = indices[offset_indices + j] / max_n_classes
+                    for j from 0 <= j < (indptr[node_id + 1] - offset_indptr):
+                        c = indices[offset_indices_ptr + j] % max_n_classes
+                        k = indices[offset_indices_ptr + j] / max_n_classes
                         out_multi[i, k, c] = data[offset_indptr + j]
 
+            print self.toarray()
             return out_multi
 
     cdef np.ndarray toarray(self):
@@ -1931,16 +1930,17 @@ cdef class CompressedStorage(Storage):
         out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
 
         for i from 0 <= i < node_count:
-            if (indptr[i + 1] - indptr[i]) == value_stride:
-               offset_indptr = indptr[i]
+            offset_indices = indices_ptr[i]
+            offset_indptr = indptr[i]
+
+            if (indptr[i + 1] - offset_indptr) == value_stride:
                for k from 0 <= k < n_outputs:
                     for c from 0 <= c < n_classes[k]:
                         out[i, k, c] = data[offset_indptr + c]
                     offset_indptr += max_n_classes
 
             else:
-                offset_indices = indices_ptr[i]
-                offset_indptr = indptr[i]
+
                 for j from 0 <= j < (indptr[i + 1] - indptr[i]):
                     c = indices[offset_indices + j] % max_n_classes
                     k = indices[offset_indices + j] / max_n_classes
