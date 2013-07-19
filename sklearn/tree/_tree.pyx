@@ -1494,7 +1494,7 @@ cdef class SparseCSRStorage(Storage):
 
         # Store only non zero element
         for k from 0 <= k < n_outputs:
-            for c from 0 <= c <= n_classes[k]:
+            for c from 0 <= c < n_classes[k]:
                 if value_buffer[offset + c] != 0.0:
                     data[n_non_zeros] = value_buffer[offset + c]
                     indices[n_non_zeros] = offset + c
