@@ -1244,7 +1244,7 @@ cdef class Storage:
         """Ad the node value in storage with id set to node_ids"""
         pass
 
-    cdef np.ndarray node_value(self, SIZE_t* node_id, SIZE_t n_samples):
+    cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
         """Get node values for given node_ids"""
         pass
 
@@ -1376,7 +1376,8 @@ cdef class SparseCSRStorage(Storage):
         def __get__(self):
             nbytes = super(SparseCSRStorage, self).nbytes
             nbytes += self.capacity * sizeof(double)  # indptr
-            nbytes += 2 * self.capacity_nnz * sizeof(SIZE_t)  # data + indices
+            nbytes += self.capacity_nnz * sizeof(double)  # data
+            nbytes += self.capacity_nnz * sizeof(SIZE_t)  # indices
             nbytes += self.value_stride * sizeof(double)  # value_buffer
             nbytes += 2 * sizeof(SIZE_t) # capacity_nnz + node_count
             return nbytes
@@ -1483,7 +1484,6 @@ cdef class SparseCSRStorage(Storage):
 
         Warning: assume that added nodes are always increasing
         """
-
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t max_n_classes = self.max_n_classes
@@ -1597,6 +1597,356 @@ cdef class SparseCSRStorage(Storage):
 
         return out
 
+
+cdef class CompressedStorage(Storage):
+    # Dense + CSR datastructure
+    cdef double* data
+    cdef SIZE_t* indices
+    cdef SIZE_t* indices_ptr
+    cdef SIZE_t* indptr
+
+    cdef SIZE_t capacity_data  # Maximal capacity of the csr structure
+    cdef SIZE_t capacity_indices  # Maximal capacity of the csr structure
+    cdef SIZE_t node_count  # Number of saved nodes
+
+    cdef double* value_buffer  # Buffer to pass value
+
+
+    property nbytes:
+        def __get__(self):
+            nbytes = super(CompressedStorage, self).nbytes
+            nbytes += 2 * self.capacity * sizeof(double)  # indptr & indices_ptr
+            nbytes += self.capacity_data * sizeof(double)  # data
+            nbytes += self.capacity_indices * sizeof(SIZE_t)  # indices
+            nbytes += self.value_stride * sizeof(double)  # value_buffer
+            nbytes += 3 * sizeof(SIZE_t) # capacity_{data, indices} + node_count
+            return nbytes
+
+    def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
+                  np.ndarray[SIZE_t, ndim=1] n_classes):
+
+        self.value_buffer = <double*> malloc(self.value_stride * sizeof(double))
+
+        self.indptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
+        self.indptr[0] = 0
+        self.indptr[1] = 0
+        self.indices_ptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
+
+        self.indices_ptr[0] = 0
+        self.indices_ptr[1] = 0
+
+        self.capacity = 1
+
+    def __dealloc__(self):
+        """Destructor."""
+        free(self.data)
+        free(self.indices)
+        free(self.indices_ptr)
+        free(self.indptr)
+        free(self.value_buffer)
+
+    def __reduce__(self):
+        """Reduce re-implementation, for pickling."""
+        return (CompressedStorage,
+                (self.splitter,
+                 self.n_outputs,
+                 sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
+                self.__getstate__())
+
+    def __getstate__(self):
+        """Getstate re-implementation, for pickling."""
+        d = super(CompressedStorage, self).__getstate__()
+        d["node_count"] = self.node_count
+        d["capacity_data"] = self.capacity_data
+        d["capacity_indices"] = self.capacity_indices
+
+        d["indptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
+        d["indices_ptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
+        d["indices"] = sizet_ptr_to_ndarray(self.indices, self.capacity_indices)
+        d["data"] = double_ptr_to_ndarray(self.data, self.capacity_data)
+        return d
+
+    def __setstate__(self, d):
+        """Setstate re-implementation, for unpickling."""
+        super(CompressedStorage, self).__setstate__(d)
+
+        self.resize_data(d["capacity_data"])
+        self.capacity_data = d["capacity_data"]
+        self.resize_indices(d["capacity_indices"])
+        self.capacity_indices = d["capacity_indices"]
+        self.node_count = d["node_count"]
+
+        # Depend on capacity
+        cdef SIZE_t* indptr = <SIZE_t*> (<np.ndarray> d["indptr"]).data
+        memcpy(self.indptr, indptr, self.capacity * sizeof(SIZE_t))
+
+        cdef SIZE_t* indices_ptr = <SIZE_t*> (<np.ndarray> d["indices_ptr"]).data
+        memcpy(self.indices_ptr, indices_ptr, self.capacity * sizeof(SIZE_t))
+
+        # Depend on capacity_nnz
+        cdef SIZE_t* indices = <SIZE_t*> (<np.ndarray> d["indices"]).data
+        memcpy(self.indices, indices, self.capacity_indices * sizeof(SIZE_t))
+
+        cdef double* data = <double*> (<np.ndarray> d["data"]).data
+        memcpy(self.data, data, self.capacity_data * sizeof(double))
+
+    # Methods
+    cdef void resize(self, SIZE_t capacity):
+        """Resize storage to at capacity node"""
+        capacity = capacity + 1
+
+        if capacity == self.capacity:
+            self.resize_data(self.indptr[self.node_count + 1])
+            self.resize_indices(self.indices_ptr[self.node_count + 1])
+            return
+
+        cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, capacity * sizeof(SIZE_t))
+        if tmp_indptr != NULL:
+            self.indptr = tmp_indptr
+
+        cdef SIZE_t* tmp_indices_ptr = <SIZE_t*> realloc(self.indices_ptr, capacity * sizeof(SIZE_t))
+        if tmp_indices_ptr != NULL:
+            self.indices_ptr = tmp_indices_ptr
+
+        if ((tmp_indptr == NULL) or
+            (tmp_indices_ptr == NULL)):
+            raise MemoryError()
+
+        # Wee need always one more value for last ptr
+        self.capacity =capacity
+
+    cdef void resize_data(self, SIZE_t capacity_data):
+        """Resize data array to "capacity_data", if -1 double size"""
+        if capacity_data == self.capacity_data:
+            return
+
+        if capacity_data < 0:
+            if self.capacity_data <= 0:
+                capacity_data = self.value_stride  # default initial value
+            else:
+                capacity_data = 2 * self.capacity_data
+
+        self.capacity_data = capacity_data
+
+        cdef double* tmp_data = <double*> realloc(self.data, capacity_data  * sizeof(double))
+        if tmp_data != NULL:
+            self.data = tmp_data
+
+        if ((tmp_data == NULL)):
+            raise MemoryError()
+
+
+    cdef void resize_indices(self, SIZE_t capacity_indices):
+        """Resize data array to "capacity_indices", if -1 doubles size"""
+        if capacity_indices == self.capacity_indices:
+            return
+
+        if capacity_indices < 0:
+            if self.capacity_indices <= 0:
+                capacity_indices = self.value_stride  # default initial value
+            else:
+                capacity_indices = 2 * self.capacity_indices
+
+        self.capacity_indices = capacity_indices
+
+        cdef SIZE_t* tmp_indices = <SIZE_t*> realloc(self.indices, capacity_indices  * sizeof(SIZE_t))
+        if tmp_indices != NULL:
+            self.indices = tmp_indices
+
+        if ((tmp_indices == NULL)):
+            raise MemoryError()
+
+    cdef void add_node(self, SIZE_t node_id):
+        """Ad the node value in storage with id set to node_ids
+
+        Warning: assume that added nodes are always increasing
+        """
+        cdef SIZE_t value_stride = self.value_stride
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef double* value_buffer = self.value_buffer
+
+        cdef SIZE_t node_count = self.node_count
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices_ptr = self.indices_ptr
+        cdef SIZE_t n_data = indptr[node_count + 1]
+        cdef SIZE_t n_indices = indices_ptr[node_count + 1]
+
+        cdef bint is_sparse
+
+       # Check that we have enough rooms for the new value
+        if n_data + value_stride > self.capacity_data:
+            self.resize_data(-1)
+
+        if n_indices + value_stride > self.capacity_indices:
+            self.resize_indices(-1)
+
+        cdef SIZE_t* indices = self.indices
+        cdef double* data = self.data
+
+        cdef SIZE_t k
+        cdef SIZE_t c
+        cdef SIZE_t n
+        cdef SIZE_t offset
+
+        self.splitter.node_value(value_buffer)
+
+        # Extend indptr and indices_ptr
+        if (node_id < node_count):
+            raise ValueError("node_id should be greater than node_count")
+
+        for n from node_count + 1 < n <= node_id:
+            indptr[n] = n_data
+            indices_ptr[n] = n_indices
+
+        # Compute sparsity of value buffer
+        # TODO: this can be optimized in some case
+        #       unbalanced number of classed or only binary classes
+        cdef SIZE_t counter = 0
+        for k from 0 <= k < value_stride:
+            if value_buffer[k] != 0:
+                counter += 1
+
+        if 2 * counter < value_stride:
+            is_sparse = True
+        else:
+            is_sparse = False
+
+        # Store node value
+        if is_sparse:
+            offset = 0
+            for k from 0 <= k < n_outputs:
+                for c from 0 <= c < n_classes[k]:
+                    if value_buffer[offset + c] != 0:
+                        data[n_data] = value_buffer[offset + c]
+                        indices[n_indices] = offset + c
+                        n_data += 1
+                        n_indices += 1
+
+                offset += max_n_classes
+        else:
+            offset = 0
+            for k from 0 <= k < value_stride:
+                data[n_data + k] = value_buffer[k]
+
+            n_data += value_stride
+
+        # Update range
+        self.node_count = node_id
+        indptr[node_id + 1] = n_data
+        indices_ptr[node_id + 1] = n_indices
+
+    cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
+        """Get node values for given node_ids"""
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices = self.indices
+        cdef SIZE_t* indices_ptr = self.indices_ptr
+        cdef double* data = self.data
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t c
+        cdef SIZE_t j
+        cdef SIZE_t offset_indices
+        cdef SIZE_t offset_indptr
+
+        cdef np.ndarray[np.float64_t, ndim=2] out
+        cdef np.ndarray[np.float64_t, ndim=3] out_multi
+
+        if self.n_outputs == 1:
+            out = np.zeros((n_samples, max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                if (value_stride == (indptr[node_ids[i + 1]]) -
+                                     indptr[node_ids[i]]):
+                    # Dense node
+                    offset_indptr = indptr[node_ids[i]]
+                    for c from 0 <= c < n_classes[0]:
+                        out[i, c] = data[offset_indptr + c]
+
+                else:
+                    # Sparse node
+                    offset_indices = indices_ptr[node_ids[i]]
+                    offset_indptr = indptr[node_ids[i]]
+                    for j from 0 <= j < (indptr[node_ids[i] + 1] - indptr[node_ids[i]]):
+                        c = indices[offset_indices + j]
+                        out[i, c] = data[offset_indptr + j]
+            return out
+
+        else: # n_outputs > 1
+            out_multi = np.zeros((n_samples,
+                                  n_outputs,
+                                  max_n_classes), dtype=np.float64)
+
+            for i from 0 <= i < n_samples:
+                if (value_stride == (indptr[node_ids[i + 1]]) -
+                                     indptr[node_ids[i]]):
+                    offset_indptr = indptr[node_ids[i]]
+
+                    # Dense node
+                    for k from 0 <= k < n_outputs:
+                        for c from 0 <= c < n_classes[k]:
+                            out_multi[i, k, c] = data[offset_indptr + c]
+
+                else:
+                    # Sparse node
+                    offset_indices = indices_ptr[node_ids[i]]
+                    offset_indptr = indptr[node_ids[i]]
+                    for j from 0 <= j < (indptr[node_ids[i] + 1] - indptr[node_ids[i]]):
+                        c = indices[offset_indices + j] % max_n_classes
+                        k = indices[offset_indices + j] / max_n_classes
+                        out_multi[i, k, c] = data[offset_indptr + j]
+
+            return out_multi
+
+    cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices = self.indices
+        cdef SIZE_t* indices_ptr = self.indices_ptr
+        cdef double* data = self.data
+        cdef SIZE_t capacity = self.capacity
+        cdef SIZE_t capacity_data = self.capacity_data
+        cdef SIZE_t capacity_indices = self.capacity_indices
+        cdef SIZE_t node_count = self.node_count
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t j
+        cdef SIZE_t offset_indices
+        cdef SIZE_t offset_indptr
+
+        cdef np.ndarray[np.float64_t, ndim=3] out
+        out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
+
+        for i from 0 <= i < node_count:
+            if (indptr[i + 1] - indptr[i]) == value_stride:
+               offset_indptr = indptr[i]
+               for k from 0 <= k < n_outputs:
+                    for c from 0 <= c < n_classes[k]:
+                        out[i, k, c] = data[offset_indptr + c]
+                    offset_indptr += max_n_classes
+
+            else:
+                offset_indices = indices_ptr[i]
+                offset_indptr = indptr[i]
+                for j from 0 <= j < (indptr[i + 1] - indptr[i]):
+                    c = indices[offset_indices + j] % max_n_classes
+                    k = indices[offset_indices + j] / max_n_classes
+                    out[i, k, c] = data[offset_indptr + j]
+
+        return out
 
 # =============================================================================
 # Tree

@@ -45,7 +45,8 @@ CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
 CRITERIA_REG = {"mse": _tree.MSE}
 SPLITTERS = {"best": _tree.BestSplitter, "random": _tree.RandomSplitter}
 NODE_STORAGE = {"sparse_csr": _tree.SparseCSRStorage,
-                "dense": _tree.DenseStorage}
+                "dense": _tree.DenseStorage,
+                "compressed": _tree.CompressedStorage}
 
 
 # =============================================================================
