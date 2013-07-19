@@ -102,6 +102,7 @@ cdef class Storage:
     cdef Splitter splitter
     cdef SIZE_t capacity                # Maximal number of nodes that can be
                                         # stored
+    cdef SIZE_t nbytes           # Total number of bytes used by Storage
     cdef SIZE_t n_outputs               # Number of outputs in y
     cdef SIZE_t* n_classes              # Number of classes in y[:, k]
     cdef SIZE_t max_n_classes           # max(n_classes)
@@ -127,6 +128,7 @@ cdef class Tree:
 
     # Parameters
     cdef public Splitter splitter        # Splitting algorithm
+    cdef public Storage storage          # Nodes values node[i]
     cdef public SIZE_t max_depth         # Max depth of the tree
     cdef public SIZE_t min_samples_split # Minimum number of samples in an internal node
     cdef public SIZE_t min_samples_leaf  # Minimum number of samples in a leaf
@@ -141,7 +143,6 @@ cdef class Tree:
     cdef double* threshold               # threshold[i] is the threshold value at node i
     cdef double* impurity                # impurity[i] is the impurity of node i (i.e., the value of the criterion)
     cdef SIZE_t* n_node_samples          # n_node_samples[i] is the number of samples at node i
-    cdef Storage storage                # Nodes values node[i]
 
     # Methods
     cdef SIZE_t _add_node(self, SIZE_t parent,

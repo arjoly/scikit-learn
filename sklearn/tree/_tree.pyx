@@ -1190,6 +1190,11 @@ cdef class RandomSplitter(Splitter):
 # =============================================================================
 cdef class Storage:
 
+    property nbytes:
+        def __get__(self):
+            nbytes = (5 + self.n_outputs) * sizeof(SIZE_t)
+            return nbytes
+
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
 
@@ -1240,14 +1245,22 @@ cdef class Storage:
         pass
 
     cdef np.ndarray node_value(self, SIZE_t* node_id, SIZE_t n_samples):
+        """Get node values for given node_ids"""
         pass
 
     cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
         pass
 
 
 cdef class DenseStorage(Storage):
     cdef double* data
+
+    property nbytes:
+        def __get__(self):
+            nbytes = super(DenseStorage, self).nbytes
+            nbytes += self.capacity * self.value_stride *sizeof(double)
+            return nbytes
 
     def __dealloc__(self):
         """Destructor."""
@@ -1294,6 +1307,8 @@ cdef class DenseStorage(Storage):
         self.splitter.node_value(self.data + node_id * self.value_stride)
 
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
+        """Get node values for given node_ids"""
+
         cdef SIZE_t* n_classes = self.n_classes
         cdef double* data = self.data
 
@@ -1335,6 +1350,7 @@ cdef class DenseStorage(Storage):
             return out_multi
 
     cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
         cdef np.npy_intp shape[3]
 
         shape[0] = <np.npy_intp> self.capacity
@@ -1356,7 +1372,14 @@ cdef class SparseCSRStorage(Storage):
 
     cdef double* value_buffer  # Buffer to pass value
 
-    # TODO check that indptr has correct shape
+    property nbytes:
+        def __get__(self):
+            nbytes = super(SparseCSRStorage, self).nbytes
+            nbytes += self.capacity * sizeof(double)  # indptr
+            nbytes += 2 * self.capacity_nnz * sizeof(SIZE_t)  # data + indices
+            nbytes += self.value_stride * sizeof(double)  # value_buffer
+            nbytes += 2 * sizeof(SIZE_t) # capacity_nnz + node_count
+            return nbytes
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
@@ -1414,7 +1437,7 @@ cdef class SparseCSRStorage(Storage):
         """Resize storage of non zero element. If capacity_nnz < 0,
         capacity_nnz is doubled.
         """
-        if capacity_nnz == self.capacity:
+        if capacity_nnz == self.capacity_nnz:
             return
 
         if capacity_nnz < 0:
@@ -1494,7 +1517,7 @@ cdef class SparseCSRStorage(Storage):
         # Store only non zero element
         for k from 0 <= k < n_outputs:
             for c from 0 <= c < n_classes[k]:
-                if value_buffer[offset + c] != 0.0:
+                if value_buffer[offset + c] != 0:
                     data[n_non_zeros] = value_buffer[offset + c]
                     indices[n_non_zeros] = offset + c
                     n_non_zeros += 1
@@ -1507,6 +1530,7 @@ cdef class SparseCSRStorage(Storage):
 
 
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples):
+        """Get node values for given node_ids"""
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t max_n_classes = self.max_n_classes
@@ -1547,6 +1571,7 @@ cdef class SparseCSRStorage(Storage):
             return out_multi
 
     cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t max_n_classes = self.max_n_classes
         cdef SIZE_t value_stride = self.value_stride
@@ -1555,6 +1580,7 @@ cdef class SparseCSRStorage(Storage):
         cdef SIZE_t* indices = self.indices
         cdef double* data = self.data
         cdef SIZE_t capacity = self.capacity
+        cdef SIZE_t node_count = self.node_count
 
         cdef SIZE_t i
         cdef SIZE_t k
@@ -1563,8 +1589,8 @@ cdef class SparseCSRStorage(Storage):
         cdef np.ndarray[np.float64_t, ndim=3] out
         out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
 
-        for i from 0 <= i < capacity:
-            for j from indptr[j] <= j < indptr[j + 1]:
+        for i from 0 <= i < node_count:
+            for j from indptr[i] <= j < indptr[i + 1]:
                 c = indices[j] % max_n_classes
                 k = indices[j] / max_n_classes
                 out[i, k, c] = data[j]
