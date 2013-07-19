@@ -1,8 +1,8 @@
 
 # encoding: utf-8
 # cython: cdivision=True
-# cython: boundscheck=False
-# cython: wraparound=False
+# cython: boundscheck=True
+# cython: wraparound=True
 
 # Authors: Gilles Louppe <g.louppe@gmail.com>
 #          Peter Prettenhofer <peter.prettenhofer@gmail.com>
@@ -1362,6 +1362,10 @@ cdef class SparseCSRStorage(Storage):
                   np.ndarray[SIZE_t, ndim=1] n_classes):
 
         self.value_buffer = <double*> malloc(self.value_stride * sizeof(double))
+        self.indptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
+        self.indptr[0] = 0
+        self.indptr[1] = 0
+        self.capacity = 1
 
     def __dealloc__(self):
         free(self.data)
@@ -1415,7 +1419,7 @@ cdef class SparseCSRStorage(Storage):
 
         if capacity_nnz < 0:
             if self.capacity_nnz <= 0:
-                capacity_nnz = self.value_stride # default initial value
+                capacity_nnz = self.value_stride  # default initial value
             else:
                 capacity_nnz = 2 * self.capacity_nnz
 
@@ -1435,11 +1439,13 @@ cdef class SparseCSRStorage(Storage):
 
     cdef void resize(self, SIZE_t capacity):
         """Resize storage to at capacity node"""
-        if capacity + 1 == self.capacity:
+        capacity = capacity + 1
+
+        if capacity == self.capacity:
             self.resize_nnz(self.indptr[self.node_count + 1])
             return
 
-        cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, (capacity + 1) * sizeof(SIZE_t))
+        cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, capacity * sizeof(SIZE_t))
         if tmp_indptr != NULL:
             self.indptr = tmp_indptr
 
@@ -1447,26 +1453,30 @@ cdef class SparseCSRStorage(Storage):
             raise MemoryError()
 
         # Wee need always one more value for last ptr
-        self.capacity = capacity + 1
-
+        self.capacity =capacity
 
     cdef void add_node(self, SIZE_t node_id):
         """Ad the node value in storage with id set to node_ids
 
         Warning: assume that added nodes are always increasing
         """
+
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t max_n_classes = self.max_n_classes
-
         cdef double* value_buffer = self.value_buffer
 
-        cdef SIZE_t* indptr = self.indptr
         cdef SIZE_t node_count = self.node_count
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t n_non_zeros = indptr[node_count + 1]
+
+       # Check that we have enough rooms for the new value
+        if n_non_zeros + self.value_stride > self.capacity_nnz:
+            self.resize_nnz(-1)
+
         cdef SIZE_t* indices = self.indices
         cdef double* data = self.data
 
-        cdef SIZE_t n_non_zeros = indptr[node_count]
         cdef SIZE_t k
         cdef SIZE_t c
         cdef SIZE_t n
@@ -1474,16 +1484,12 @@ cdef class SparseCSRStorage(Storage):
 
         self.splitter.node_value(value_buffer)
 
-        # Check that we have enough rooms for the new value
-        if n_non_zeros + self.value_stride > self.capacity_nnz:
-            self.resize_nnz(-1)
-
         # Extend indptr
         # TODO disable for speed
         if (node_id < node_count):
             raise ValueError("node_id should be greater than node_count")
 
-        for n from node_count < n <= node_id:
+        for n from node_count + 1 < n <= node_id:
             indptr[n] = n_non_zeros
 
         # Store only non zero element
@@ -1497,6 +1503,7 @@ cdef class SparseCSRStorage(Storage):
             offset += max_n_classes
 
         # Update range
+        self.node_count = node_id
         indptr[node_id + 1] = n_non_zeros
 
 
@@ -1641,8 +1648,6 @@ cdef class Tree:
         self.threshold = NULL
         self.impurity = NULL
         self.n_node_samples = NULL
-
-
 
     def __dealloc__(self):
         """Destructor."""

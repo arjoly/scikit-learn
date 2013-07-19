@@ -13,6 +13,8 @@ from sklearn import tree
 from sklearn import datasets
 from sklearn.utils import safe_asarray
 
+from sklearn.tree.tree import NODE_STORAGE
+
 # toy sample
 X = [[-2, -1], [-1, -1], [-1, -2], [1, 1], [1, 2], [2, 1]]
 y = [-1, -1, -1, 1, 1, 1]
@@ -72,23 +74,26 @@ def test_balance_weights():
 
 def test_classification_toy():
     """Check classification on a toy dataset."""
-    # Decision trees
-    clf = tree.DecisionTreeClassifier()
-    clf.fit(X, y)
-    assert_array_equal(clf.predict(T), true_result)
+    for storage in NODE_STORAGE:
+        # Decision trees
+        clf = tree.DecisionTreeClassifier(storage=storage)
+        clf.fit(X, y)
+        assert_array_equal(clf.predict(T), true_result)
 
-    clf = tree.DecisionTreeClassifier(max_features=1, random_state=1)
-    clf.fit(X, y)
-    assert_array_equal(clf.predict(T), true_result)
+        clf = tree.DecisionTreeClassifier(max_features=1, storage=storage,
+                                          random_state=1)
+        clf.fit(X, y)
+        assert_array_equal(clf.predict(T), true_result)
 
-    # Extra-trees
-    clf = tree.ExtraTreeClassifier()
-    clf.fit(X, y)
-    assert_array_equal(clf.predict(T), true_result)
+        # Extra-trees
+        clf = tree.ExtraTreeClassifier(storage=storage)
+        clf.fit(X, y)
+        assert_array_equal(clf.predict(T), true_result)
 
-    clf = tree.ExtraTreeClassifier(max_features=1, random_state=1)
-    clf.fit(X, y)
-    assert_array_equal(clf.predict(T), true_result)
+        clf = tree.ExtraTreeClassifier(max_features=1, storage=storage,
+                                       random_state=1)
+        clf.fit(X, y)
+        assert_array_equal(clf.predict(T), true_result)
 
 
 def test_weighted_classification_toy():
@@ -597,6 +602,3 @@ def test_sample_weight():
     # assert (proba >= 0).all() and (proba <= 1).all()
 
 
-if __name__ == "__main__":
-    import nose
-    nose.runmodule()

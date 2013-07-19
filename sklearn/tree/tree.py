@@ -238,6 +238,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                                                 random_state)
         storage = self.storage
         if not isinstance(self.storage, Storage):
+            print storage
             storage = NODE_STORAGE[self.storage](splitter,
                                                  self.n_outputs_,
                                                  self.n_classes_)
