@@ -98,34 +98,38 @@ def test_classification_toy():
 
 def test_weighted_classification_toy():
     """Check classification on a weighted toy dataset."""
-    clf = tree.DecisionTreeClassifier()
+    for storage in NODE_STORAGE:
+        clf = tree.DecisionTreeClassifier(storage=storage)
 
-    clf.fit(X, y, sample_weight=np.ones(len(X)))
-    assert_array_equal(clf.predict(T), true_result)
+        clf.fit(X, y, sample_weight=np.ones(len(X)))
+        assert_array_equal(clf.predict(T), true_result)
 
-    clf.fit(X, y, sample_weight=np.ones(len(X)) * 0.5)
-    assert_array_equal(clf.predict(T), true_result)
+        clf.fit(X, y, sample_weight=np.ones(len(X)) * 0.5)
+        assert_array_equal(clf.predict(T), true_result)
 
 
 def test_regression_toy():
     """Check regression on a toy dataset."""
-    # Decision trees
-    clf = tree.DecisionTreeRegressor()
-    clf.fit(X, y)
-    assert_almost_equal(clf.predict(T), true_result)
+    for storage in NODE_STORAGE:
+        # Decision trees
+        clf = tree.DecisionTreeRegressor(storage=storage)
+        clf.fit(X, y)
+        assert_almost_equal(clf.predict(T), true_result)
 
-    clf = tree.DecisionTreeRegressor(max_features=1, random_state=1)
-    clf.fit(X, y)
-    assert_almost_equal(clf.predict(T), true_result)
+        clf = tree.DecisionTreeRegressor(max_features=1, storage=storage,
+                                         random_state=1)
+        clf.fit(X, y)
+        assert_almost_equal(clf.predict(T), true_result)
 
-    # Extra-trees
-    clf = tree.ExtraTreeRegressor()
-    clf.fit(X, y)
-    assert_almost_equal(clf.predict(T), true_result)
+        # Extra-trees
+        clf = tree.ExtraTreeRegressor(storage=storage)
+        clf.fit(X, y)
+        assert_almost_equal(clf.predict(T), true_result)
 
-    clf = tree.ExtraTreeRegressor(max_features=1, random_state=1)
-    clf.fit(X, y)
-    assert_almost_equal(clf.predict(T), true_result)
+        clf = tree.ExtraTreeRegressor(storage=storage, max_features=1,
+                                      random_state=1)
+        clf.fit(X, y)
+        assert_almost_equal(clf.predict(T), true_result)
 
 
 def test_xor():
@@ -139,21 +143,22 @@ def test_xor():
     X = np.vstack([gridx.ravel(), gridy.ravel()]).T
     y = y.ravel()
 
-    clf = tree.DecisionTreeClassifier()
-    clf.fit(X, y)
-    assert_equal(clf.score(X, y), 1.0)
+    for storage in NODE_STORAGE:
+        clf = tree.DecisionTreeClassifier(storage=storage)
+        clf.fit(X, y)
+        assert_equal(clf.score(X, y), 1.0)
 
-    clf = tree.DecisionTreeClassifier(max_features=1)
-    clf.fit(X, y)
-    assert_equal(clf.score(X, y), 1.0)
+        clf = tree.DecisionTreeClassifier(max_features=1, storage=storage)
+        clf.fit(X, y)
+        assert_equal(clf.score(X, y), 1.0)
 
-    clf = tree.ExtraTreeClassifier()
-    clf.fit(X, y)
-    assert_equal(clf.score(X, y), 1.0)
+        clf = tree.ExtraTreeClassifier(storage=storage)
+        clf.fit(X, y)
+        assert_equal(clf.score(X, y), 1.0)
 
-    clf = tree.ExtraTreeClassifier(max_features=1)
-    clf.fit(X, y)
-    assert_equal(clf.score(X, y), 1.0)
+        clf = tree.ExtraTreeClassifier(max_features=1, storage=storage)
+        clf.fit(X, y)
+        assert_equal(clf.score(X, y), 1.0)
 
 
 def test_iris():
@@ -600,5 +605,3 @@ def test_sample_weight():
     # clf.fit(X, y, sample_weight=sample_weight)
     # proba = clf.predict_proba(X)
     # assert (proba >= 0).all() and (proba <= 1).all()
-
-
