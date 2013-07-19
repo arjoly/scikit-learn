@@ -1485,7 +1485,6 @@ cdef class SparseCSRStorage(Storage):
         self.splitter.node_value(value_buffer)
 
         # Extend indptr
-        # TODO disable for speed
         if (node_id < node_count):
             raise ValueError("node_id should be greater than node_count")
 
@@ -1600,7 +1599,7 @@ cdef class Tree:
 
     property value:
         def __get__(self):
-            return self._storage.toarray()
+            return self.storage.toarray()
 
     property impurity:
         def __get__(self):
@@ -1633,7 +1632,7 @@ cdef class Tree:
 
         # Parameters
         self.splitter = splitter
-        self._storage = storage
+        self.storage = storage
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
@@ -1666,7 +1665,7 @@ cdef class Tree:
                        sizet_ptr_to_ndarray(self.n_classes, self.n_outputs),
                        self.n_outputs,
                        self.splitter,
-                       self._storage,
+                       self.storage,
                        self.max_depth,
                        self.min_samples_split,
                        self.min_samples_leaf,
@@ -1684,7 +1683,7 @@ cdef class Tree:
         d["threshold"] = double_ptr_to_ndarray(self.threshold, self.capacity)
         d["impurity"] = double_ptr_to_ndarray(self.impurity, self.capacity)
         d["n_node_samples"] = sizet_ptr_to_ndarray(self.n_node_samples, self.capacity)
-        d["_storage"] = self._storage
+        d["storage"] = self.storage
 
         return d
 
@@ -1692,7 +1691,7 @@ cdef class Tree:
         """Setstate re-implementation, for unpickling."""
         self._resize(d["capacity"])
         self.node_count = d["node_count"]
-        self._storage = d["_storage"]
+        self.storage = d["storage"]
 
         cdef SIZE_t* children_left = <SIZE_t*> (<np.ndarray> d["children_left"]).data
         cdef SIZE_t* children_right =  <SIZE_t*> (<np.ndarray> d["children_right"]).data
@@ -1738,7 +1737,7 @@ cdef class Tree:
         if tmp_threshold != NULL:
             self.threshold = tmp_threshold
 
-        self._storage.resize(capacity)
+        self.storage.resize(capacity)
 
         cdef double* tmp_impurity = <double*> realloc(self.impurity, capacity * sizeof(double))
         if tmp_impurity != NULL:
@@ -1882,7 +1881,7 @@ cdef class Tree:
 
             if is_leaf:
                 # Don't store value for internal nodes
-                self._storage.add_node(node_id)
+                self.storage.add_node(node_id)
 
             else:
                 if stack_n_values + 10 > stack_capacity:
@@ -1914,7 +1913,7 @@ cdef class Tree:
         cdef SIZE_t* children_right = self.children_right
         cdef SIZE_t* feature = self.feature
         cdef double* threshold = self.threshold
-        cdef Storage storage = self._storage
+        cdef Storage storage = self.storage
 
         cdef SIZE_t n_samples = X.shape[0]
         cdef SIZE_t* n_classes = self.n_classes
