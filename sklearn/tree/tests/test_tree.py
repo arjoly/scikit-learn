@@ -3,11 +3,11 @@ Testing for the tree module (sklearn.tree).
 """
 
 import numpy as np
-from numpy.testing import assert_array_equal
-from numpy.testing import assert_array_almost_equal
-from numpy.testing import assert_almost_equal
-from numpy.testing import assert_equal
-from nose.tools import assert_raises
+from sklearn.utils.testing import assert_array_equal
+from sklearn.utils.testing import assert_array_almost_equal
+from sklearn.utils.testing import assert_almost_equal
+from sklearn.utils.testing import assert_equal
+from sklearn.utils.testing import assert_raises
 
 from sklearn import tree
 from sklearn import datasets
@@ -507,7 +507,7 @@ def test_classes_shape():
     clf.fit(X, y)
 
     assert_equal(clf.n_classes_, 2)
-    assert_equal(clf.classes_, [-1, 1])
+    assert_array_equal(clf.classes_, [-1, 1])
 
     # Classification, multi-output
     _y = np.vstack((y, np.array(y) * 2)).T
@@ -516,8 +516,8 @@ def test_classes_shape():
 
     assert_equal(len(clf.n_classes_), 2)
     assert_equal(len(clf.classes_), 2)
-    assert_equal(clf.n_classes_, [2, 2])
-    assert_equal(clf.classes_, [[-1, 1], [-2, 2]])
+    assert_array_equal(clf.n_classes_, [2, 2])
+    assert_array_equal(clf.classes_, [[-1, 1], [-2, 2]])
 
 
 def test_unbalanced_iris():
