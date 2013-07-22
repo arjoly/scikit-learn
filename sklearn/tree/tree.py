@@ -25,7 +25,7 @@ from ..utils import array2d, check_random_state
 from ..utils.fixes import unique
 from ..utils.validation import check_arrays
 
-from ._tree import Criterion, Splitter, Tree
+from ._tree import Criterion, Splitter, Tree, Storage
 from . import _tree
 
 
@@ -45,6 +45,7 @@ DOUBLE = _tree.DOUBLE
 CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
 CRITERIA_REG = {"mse": _tree.MSE}
 SPLITTERS = {"best": _tree.BestSplitter, "random": _tree.RandomSplitter}
+NODE_STORAGE = {"flat": _tree.FlatStorage}
 
 
 # =============================================================================
@@ -75,6 +76,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
         self.random_state = random_state
+        self.storage = "flat"
 
         self.n_features_ = None
         self.n_outputs_ = None
@@ -83,9 +85,10 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         self.splitter_ = None
         self.tree_ = None
+        self.storage_ = None
 
     def fit(self, X, y, sample_mask=None, X_argsorted=None,
-                  check_input=True, sample_weight=None):
+            check_input=True, sample_weight=None):
         """Build a decision tree from the training set (X, y).
 
         Parameters
@@ -235,10 +238,17 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                                                 self.min_samples_leaf,
                                                 random_state)
 
+        storage = self.storage
+        if not isinstance(self.storage, Storage):
+            storage = NODE_STORAGE[self.storage](splitter,
+                                                 self.n_outputs_,
+                                                 self.n_classes_)
+
+        self.storage_ = storage
         self.criterion_ = criterion
         self.splitter_ = splitter
         self.tree_ = Tree(self.n_features_, self.n_classes_,
-                          self.n_outputs_, splitter, max_depth,
+                          self.n_outputs_, splitter, storage, max_depth,
                           min_samples_split, self.min_samples_leaf,
                           random_state)
 

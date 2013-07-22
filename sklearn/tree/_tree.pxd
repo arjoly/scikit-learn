@@ -94,6 +94,26 @@ cdef class Splitter:
 
     cdef void node_value(self, double* dest)
 
+# =============================================================================
+# Node Storage
+# =============================================================================
+
+cdef class Storage:
+    cdef Splitter splitter
+    cdef SIZE_t capacity                # Maximal number of nodes that can be
+                                        # stored
+    cdef SIZE_t nbytes           # Total number of bytes used by Storage
+    cdef SIZE_t n_outputs               # Number of outputs in y
+    cdef SIZE_t* n_classes              # Number of classes in y[:, k]
+    cdef SIZE_t max_n_classes           # max(n_classes)
+    cdef SIZE_t value_stride            # n_output * max_n_classes
+
+    # Methods
+    cdef void resize(self, SIZE_t capacity)
+    cdef void add_node(self, SIZE_t node_id)
+    cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples)
+    cdef np.ndarray toarray(self)
+
 
 # =============================================================================
 # Tree
@@ -113,6 +133,7 @@ cdef class Tree:
     cdef public SIZE_t min_samples_split # Minimum number of samples in an internal node
     cdef public SIZE_t min_samples_leaf  # Minimum number of samples in a leaf
     cdef public object random_state      # Random state
+    cdef public Storage storage
 
     # Inner structures
     cdef public SIZE_t node_count        # Counter for node IDs
@@ -121,7 +142,6 @@ cdef class Tree:
     cdef SIZE_t* children_right          # children_right[i] is the right child of node i
     cdef SIZE_t* feature                 # features[i] is the feature used for splitting node i
     cdef double* threshold               # threshold[i] is the threshold value at node i
-    cdef double* value                   # value[i] is the values contained at node i
     cdef double* impurity                # impurity[i] is the impurity of node i (i.e., the value of the criterion)
     cdef SIZE_t* n_node_samples          # n_node_samples[i] is the number of samples at node i
 
