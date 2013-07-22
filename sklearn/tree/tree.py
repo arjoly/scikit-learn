@@ -64,6 +64,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
     def __init__(self,
                  criterion,
                  splitter,
+                 storage,
                  max_depth,
                  min_samples_split,
                  min_samples_leaf,
@@ -76,7 +77,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
         self.random_state = random_state
-        self.storage = "flat"
+        self.storage = storage
 
         self.n_features_ = None
         self.n_outputs_ = None
@@ -432,6 +433,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
     def __init__(self,
                  criterion="gini",
                  splitter="best",
+                 storage="flat",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -441,6 +443,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                  compute_importances=None):
         super(DecisionTreeClassifier, self).__init__(criterion,
                                                      splitter,
+                                                     storage,
                                                      max_depth,
                                                      min_samples_split,
                                                      min_samples_leaf,
@@ -452,11 +455,10 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
 
         if compute_importances is not None:
             warn("Setting compute_importances is no longer required as "
-                  "version 0.14. Variable importances are now computed on the "
-                  "fly when accessing the feature_importances_ attribute. "
-                  "This parameter will be removed in 0.16.",
-                  DeprecationWarning)
-
+                 "version 0.14. Variable importances are now computed on the "
+                 "fly when accessing the feature_importances_ attribute. "
+                 "This parameter will be removed in 0.16.",
+                 DeprecationWarning)
 
     def predict_proba(self, X):
         """Predict class probabilities of the input samples X.
@@ -623,6 +625,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     def __init__(self,
                  criterion="mse",
                  splitter="best",
+                 storage="flat",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -632,6 +635,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
                  compute_importances=None):
         super(DecisionTreeRegressor, self).__init__(criterion,
                                                     splitter,
+                                                    storage,
                                                     max_depth,
                                                     min_samples_split,
                                                     min_samples_leaf,
@@ -674,6 +678,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
     def __init__(self,
                  criterion="gini",
                  splitter="random",
+                 storage="flat",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -683,6 +688,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
                  compute_importances=None):
         super(ExtraTreeClassifier, self).__init__(criterion,
                                                   splitter,
+                                                  storage,
                                                   max_depth,
                                                   min_samples_split,
                                                   min_samples_leaf,
@@ -725,6 +731,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
     def __init__(self,
                  criterion="mse",
                  splitter="random",
+                 storage="flat",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -734,6 +741,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
                  compute_importances=None):
         super(ExtraTreeRegressor, self).__init__(criterion,
                                                  splitter,
+                                                 storage,
                                                  max_depth,
                                                  min_samples_split,
                                                  min_samples_leaf,
@@ -745,8 +753,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
 
         if compute_importances is not None:
             warn("Setting compute_importances is no longer required as "
-                  "version 0.14. Variable importances are now computed on the "
-                  "fly when accessing the feature_importances_ attribute. "
-                  "This parameter will be removed in 0.16.",
-                  DeprecationWarning)
-
+                 "version 0.14. Variable importances are now computed on the "
+                 "fly when accessing the feature_importances_ attribute. "
+                 "This parameter will be removed in 0.16.",
+                 DeprecationWarning)
