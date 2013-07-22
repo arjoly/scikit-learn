@@ -45,7 +45,9 @@ DOUBLE = _tree.DOUBLE
 CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
 CRITERIA_REG = {"mse": _tree.MSE}
 SPLITTERS = {"best": _tree.BestSplitter, "random": _tree.RandomSplitter}
-NODE_STORAGE = {"flat": _tree.FlatStorage}
+NODE_STORAGE = {"flat": _tree.FlatStorage,
+                "sparse_csr": _tree.SparseCSRStorage,
+                "compressed": _tree.CompressedStorage}
 
 
 # =============================================================================

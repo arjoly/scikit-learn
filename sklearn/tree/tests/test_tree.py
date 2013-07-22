@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 
 from itertools import product
+from functools import partial
 
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import mean_squared_error
@@ -33,12 +34,21 @@ REG_CRITERIONS = ("mse", )
 
 CLF_TREES = {
     "DecisionTreeClassifier": DecisionTreeClassifier,
+    # Dense storage
     "ExtraTreeClassifier": ExtraTreeClassifier,
+    "ExtraTreeClassifier_storage=compressed":
+    partial(ExtraTreeClassifier, storage="compressed"),
+    "ExtraTreeClassifier_storage=sparse_csr":
+    partial(ExtraTreeClassifier, storage="sparse_csr"),
 }
 
 REG_TREES = {
     "DecisionTreeRegressor": DecisionTreeRegressor,
     "ExtraTreeRegressor": ExtraTreeRegressor,
+    "ExtraTreeRegressor_storage=compressed":
+    partial(ExtraTreeRegressor, storage="compressed"),
+    "ExtraTreeRegressor_storage=sparse_csr":
+    partial(ExtraTreeRegressor, storage="sparse_csr"),
 }
 
 ALL_TREES = dict()
