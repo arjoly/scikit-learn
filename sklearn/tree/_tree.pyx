@@ -1627,6 +1627,7 @@ cdef class CompressedStorage(Storage):
     cdef SIZE_t capacity_indices  # Maximal capacity of the csr structure
     cdef SIZE_t node_count  # Number of saved nodes
 
+    cdef bint try_to_compress
 
     property nbytes:
         def __get__(self):
@@ -1650,6 +1651,12 @@ cdef class CompressedStorage(Storage):
         self.indices_ptr[1] = 0
 
         self.capacity = 1
+
+        if self.max_n_classes <= 2:
+            self.try_to_compress = False
+        else:
+            self.try_to_compress = True
+
 
     def __dealloc__(self):
         """Destructor."""
@@ -1787,7 +1794,7 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t n_indices = indices_ptr[node_count + 1]
 
 
-        cdef bint is_sparse
+        cdef bint is_sparse = False
 
        # Check that we have enough rooms for the new value
         if n_data + value_stride > self.capacity_data:
@@ -1806,6 +1813,7 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t c
         cdef SIZE_t n
         cdef SIZE_t offset
+        cdef SIZE_t counter
 
         self.splitter.node_value(value_buffer)
 
@@ -1818,17 +1826,16 @@ cdef class CompressedStorage(Storage):
             indices_ptr[n] = n_indices
 
         # Compute sparsity of value buffer
-        # TODO: this can be optimized in some case
-        #       unbalanced number of classed or only binary classes
-        cdef SIZE_t counter = 0
-        for k from 0 <= k < value_stride:
-            if value_buffer[k] != 0.:
-                counter += 1
 
-        if 2 * counter < value_stride:
-            is_sparse = True
-        else:
-            is_sparse = False
+        if self.try_to_compress:
+            counter = 0
+            for k from 0 <= k < value_stride:
+                if value_buffer[k] != 0.:
+                    counter += 1
+
+            if 2 * counter < value_stride:
+                is_sparse = True
+
 
         # Store node value
         if is_sparse:
