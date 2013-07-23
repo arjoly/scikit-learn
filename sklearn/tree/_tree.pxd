@@ -118,7 +118,7 @@ cdef class Storage:
     cdef void resize(self, SIZE_t capacity)
     cdef void add_node(self, SIZE_t node_id)
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples)
-
+    cdef np.ndarray toarray(self)
 
 # =============================================================================
 # Tree

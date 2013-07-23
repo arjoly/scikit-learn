@@ -1277,6 +1277,10 @@ cdef class Storage:
         """Get node values for given node_ids"""
         pass
 
+    cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
+        pass
+
 
 cdef class FlatStorage(Storage):
     """ Flat storage - no memory optimization
@@ -1340,6 +1344,33 @@ cdef class FlatStorage(Storage):
                     offset += max_n_classes
 
             return out_multi
+
+    cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef double* data = self.data
+        cdef SIZE_t capacity = self.capacity_data / self.value_stride
+
+        cdef np.ndarray[np.float64_t, ndim=3] out
+        out = np.zeros((capacity, n_outputs, max_n_classes),
+                       dtype=np.float64)
+
+        cdef SIZE_t k
+        cdef SIZE_t c
+        cdef SIZE_t i
+        cdef offset = 0
+
+        for i from 0 <= i < capacity:
+            for k from 0 <= k < n_outputs:
+                for c from 0 <= c < n_classes[k]:
+                    out[i, k, c] = data[offset + c]
+                offset += max_n_classes
+
+        return out
 
 
 cdef class CompressedStorage(Storage):
@@ -1613,6 +1644,50 @@ cdef class CompressedStorage(Storage):
 
             return out_multi
 
+    cdef np.ndarray toarray(self):
+        """Transform stored values into an array"""
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t value_stride = self.value_stride
+
+        cdef SIZE_t* indptr = self.indptr
+        cdef SIZE_t* indices = self.indices
+        cdef SIZE_t* indices_ptr = self.indices_ptr
+        cdef double* data = self.data
+        cdef SIZE_t capacity = self.capacity
+        cdef SIZE_t capacity_data = self.capacity_data
+        cdef SIZE_t capacity_indices = self.capacity_indices
+        cdef SIZE_t node_count = self.node_count
+
+        cdef SIZE_t i
+        cdef SIZE_t k
+        cdef SIZE_t j
+        cdef SIZE_t offset_indices
+        cdef SIZE_t offset_indptr
+
+        cdef np.ndarray[np.float64_t, ndim=3] out
+        out = np.zeros((node_count + 1, n_outputs, max_n_classes),
+                       dtype=np.float64)
+
+        for i from 0 <= i <= node_count:
+            offset_indices = indices_ptr[i]
+            offset_indptr = indptr[i]
+
+            if (indptr[i + 1] - offset_indptr) == value_stride:
+               for k from 0 <= k < n_outputs:
+                    for c from 0 <= c < n_classes[k]:
+                        out[i, k, c] = data[offset_indptr + c]
+                    offset_indptr += max_n_classes
+
+            else:
+
+                for j from 0 <= j < (indptr[i + 1] - indptr[i]):
+                    c = indices[offset_indices + j] % max_n_classes
+                    k = indices[offset_indices + j] / max_n_classes
+                    out[i, k, c] = data[offset_indptr + j]
+
+        return out
 
 # =============================================================================
 # Tree
