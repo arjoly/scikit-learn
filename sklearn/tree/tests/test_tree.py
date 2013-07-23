@@ -641,12 +641,12 @@ def test_sample_weight():
 
 def test_storage_value_stored():
     """Check that differents storage scheme give the same value"""
-    n_samples = 2
+    n_samples = 2  # with more sample, we will have more nodes than we want
     n_features = 1
 
     rng = check_random_state(9)
     X = rng.normal(size=(n_samples, n_features))
-    y = np.arange(n_samples)
+    y = np.vstack([np.arange(n_samples) for _ in range(3)]).T
 
     clf = DecisionTreeClassifier(random_state=1, storage="flat",
                                  max_depth=1)
