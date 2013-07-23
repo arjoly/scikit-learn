@@ -653,7 +653,7 @@ def test_storage_value_stored():
     clf.fit(X, y)
     value_ref = clf.tree_.value[1:]  # Value at node may be very different
 
-    for storage in ["sparse_csr"]: #  "compressed"
+    for storage in ["sparse_csr", "compressed"]:
         clf = DecisionTreeClassifier(random_state=1, storage=storage,
                                      max_depth=1)
         clf.fit(X, y)

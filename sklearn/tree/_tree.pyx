@@ -1709,7 +1709,7 @@ cdef class CompressedStorage(Storage):
         """Resize storage to at capacity node"""
         capacity = capacity + 1
 
-        if capacity == self.capacity:
+        if capacity <= self.capacity:
             self.resize_data(self.indptr[self.node_count + 1])
             self.resize_indices(self.indices_ptr[self.node_count + 1])
             return
@@ -1941,9 +1941,10 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t offset_indptr
 
         cdef np.ndarray[np.float64_t, ndim=3] out
-        out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
+        out = np.zeros((node_count + 1, n_outputs, max_n_classes),
+                       dtype=np.float64)
 
-        for i from 0 <= i < node_count:
+        for i from 0 <= i <= node_count:
             offset_indices = indices_ptr[i]
             offset_indptr = indptr[i]
 
