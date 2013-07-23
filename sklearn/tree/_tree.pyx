@@ -1613,8 +1613,6 @@ cdef class CompressedStorage(Storage):
     cdef SIZE_t capacity_indices  # Maximal capacity of the csr structure
     cdef SIZE_t node_count  # Number of saved nodes
 
-    cdef double* value_buffer  # Buffer to pass value
-
 
     property nbytes:
         def __get__(self):
@@ -1628,8 +1626,6 @@ cdef class CompressedStorage(Storage):
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
                   np.ndarray[SIZE_t, ndim=1] n_classes):
-
-        self.value_buffer = <double*> malloc(self.value_stride * sizeof(double))
 
         self.indptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
         self.indptr[0] = 0
@@ -1647,7 +1643,6 @@ cdef class CompressedStorage(Storage):
         free(self.indices)
         free(self.indices_ptr)
         free(self.indptr)
-        free(self.value_buffer)
 
     def __reduce__(self):
         """Reduce re-implementation, for pickling."""
@@ -1770,13 +1765,13 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t max_n_classes = self.max_n_classes
-        cdef double* value_buffer = self.value_buffer
 
         cdef SIZE_t node_count = self.node_count
         cdef SIZE_t* indptr = self.indptr
         cdef SIZE_t* indices_ptr = self.indices_ptr
         cdef SIZE_t n_data = indptr[node_count + 1]
         cdef SIZE_t n_indices = indices_ptr[node_count + 1]
+
 
         cdef bint is_sparse
 
@@ -1789,6 +1784,9 @@ cdef class CompressedStorage(Storage):
 
         cdef SIZE_t* indices = self.indices
         cdef double* data = self.data
+
+        # The buffer is the end of data vector
+        cdef double* value_buffer = data + n_data
 
         cdef SIZE_t k
         cdef SIZE_t c
@@ -1831,7 +1829,6 @@ cdef class CompressedStorage(Storage):
 
                 offset += max_n_classes
         else:
-            self.splitter.node_value(data + n_data)
             n_data += value_stride
 
         # Update range
