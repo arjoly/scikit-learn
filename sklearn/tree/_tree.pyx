@@ -1253,6 +1253,8 @@ cdef class Storage:
 
 
 cdef class FlatStorage(Storage):
+    """ Flat storage - no memory optimization
+    """
     cdef double* data
 
     property nbytes:
@@ -1359,13 +1361,17 @@ cdef class FlatStorage(Storage):
         return np.PyArray_SimpleNewFromData(
             3, shape, np.NPY_DOUBLE, self.data)
 
+
 cdef class SparseCSRStorage(Storage):
+    """ Storage based on compressed storage row layout
+    """
+
     # CSR datastructure
     cdef double* data  # CSR format data array of the matrix
-    cdef SIZE_t* indices # CSR format index array of the matrix
+    cdef SIZE_t* indices  # CSR format index array of the matrix
     cdef SIZE_t* indptr  # CSR format index pointer array of the matrix
 
-    cdef SIZE_t capacity_nnz  # Maximal capacity of the csr structure
+    cdef SIZE_t capacity_data  # Maximal capacity of the csr structure
     cdef SIZE_t node_count  # Number of saved nodes
 
     cdef double* value_buffer  # Buffer to pass value
@@ -1374,10 +1380,10 @@ cdef class SparseCSRStorage(Storage):
         def __get__(self):
             nbytes = super(SparseCSRStorage, self).nbytes
             nbytes += self.capacity * sizeof(double)  # indptr
-            nbytes += self.capacity_nnz * sizeof(double)  # data
-            nbytes += self.capacity_nnz * sizeof(SIZE_t)  # indices
+            nbytes += self.capacity_data * sizeof(double)  # data
+            nbytes += self.capacity_data * sizeof(SIZE_t)  # indices
             nbytes += self.value_stride * sizeof(double)  # value_buffer
-            nbytes += 2 * sizeof(SIZE_t) # capacity_nnz + node_count
+            nbytes += 2 * sizeof(SIZE_t) # capacity_data + node_count
             return nbytes
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
@@ -1406,52 +1412,52 @@ cdef class SparseCSRStorage(Storage):
     def __getstate__(self):
         """Getstate re-implementation, for pickling."""
         d = super(SparseCSRStorage, self).__getstate__()
-        d["capacity_nnz"] = self.capacity_nnz
+        d["capacity_data"] = self.capacity_data
         d["node_count"] = self.node_count
         d["indptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
-        d["indices"] = sizet_ptr_to_ndarray(self.indices, self.capacity_nnz)
-        d["data"] = double_ptr_to_ndarray(self.data, self.capacity_nnz)
+        d["indices"] = sizet_ptr_to_ndarray(self.indices, self.capacity_data)
+        d["data"] = double_ptr_to_ndarray(self.data, self.capacity_data)
         return d
 
     def __setstate__(self, d):
         """Setstate re-implementation, for unpickling."""
         super(SparseCSRStorage, self).__setstate__(d)
 
-        self.resize_nnz(d["capacity_nnz"])
-        self.capacity_nnz = d["capacity_nnz"]
+        self.resize_data(d["capacity_data"])
+        self.capacity_data = d["capacity_data"]
         self.node_count = d["node_count"]
 
         # Depend on capacity
         cdef SIZE_t* indptr = <SIZE_t*> (<np.ndarray> d["indptr"]).data
         memcpy(self.indptr, indptr, self.capacity * sizeof(SIZE_t))
 
-        # Depend on capacity_nnz
+        # Depend on capacity_data
         cdef SIZE_t* indices = <SIZE_t*> (<np.ndarray> d["indices"]).data
-        memcpy(self.indices, indices, self.capacity_nnz * sizeof(SIZE_t))
+        memcpy(self.indices, indices, self.capacity_data * sizeof(SIZE_t))
 
         cdef double* data = <double*> (<np.ndarray> d["data"]).data
-        memcpy(self.data, data, self.capacity_nnz * sizeof(double))
+        memcpy(self.data, data, self.capacity_data * sizeof(double))
 
-    cdef void resize_nnz(self, SIZE_t capacity_nnz):
-        """Resize storage of non zero element. If capacity_nnz < 0,
-        capacity_nnz is doubled.
+    cdef void resize_data(self, SIZE_t capacity_data):
+        """Resize storage of non zero element. If capacity_data < 0,
+        capacity_data is doubled.
         """
-        if capacity_nnz == self.capacity_nnz:
+        if capacity_data == self.capacity_data:
             return
 
-        if capacity_nnz < 0:
-            if self.capacity_nnz <= 0:
-                capacity_nnz = self.value_stride  # default initial value
+        if capacity_data < 0:
+            if self.capacity_data <= 0:
+                capacity_data = self.value_stride  # default initial value
             else:
-                capacity_nnz = 2 * self.capacity_nnz
+                capacity_data = 2 * self.capacity_data
 
-        self.capacity_nnz = capacity_nnz
+        self.capacity_data = capacity_data
 
-        cdef SIZE_t* tmp_indices = <SIZE_t*> realloc(self.indices, capacity_nnz * sizeof(SIZE_t))
+        cdef SIZE_t* tmp_indices = <SIZE_t*> realloc(self.indices, capacity_data * sizeof(SIZE_t))
         if tmp_indices != NULL:
             self.indices = tmp_indices
 
-        cdef double* tmp_data = <double*> realloc(self.data, capacity_nnz  * sizeof(double))
+        cdef double* tmp_data = <double*> realloc(self.data, capacity_data  * sizeof(double))
         if tmp_data != NULL:
             self.data = tmp_data
 
@@ -1464,7 +1470,7 @@ cdef class SparseCSRStorage(Storage):
         capacity = capacity + 1
 
         if capacity == self.capacity:
-            self.resize_nnz(self.indptr[self.node_count + 1])
+            self.resize_data(self.indptr[self.node_count + 1])
             return
 
         cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, capacity * sizeof(SIZE_t))
@@ -1492,8 +1498,8 @@ cdef class SparseCSRStorage(Storage):
         cdef SIZE_t n_non_zeros = indptr[node_count + 1]
 
        # Check that we have enough rooms for the new value
-        if n_non_zeros + self.value_stride > self.capacity_nnz:
-            self.resize_nnz(-1)
+        if n_non_zeros + self.value_stride > self.capacity_data:
+            self.resize_data(-1)
 
         cdef SIZE_t* indices = self.indices
         cdef double* data = self.data
@@ -1682,7 +1688,7 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t* indices_ptr = <SIZE_t*> (<np.ndarray> d["indices_ptr"]).data
         memcpy(self.indices_ptr, indices_ptr, self.capacity * sizeof(SIZE_t))
 
-        # Depend on capacity_nnz
+        # Depend on capacity_data
         cdef SIZE_t* indices = <SIZE_t*> (<np.ndarray> d["indices"]).data
         memcpy(self.indices, indices, self.capacity_indices * sizeof(SIZE_t))
 
