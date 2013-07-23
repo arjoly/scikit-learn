@@ -1352,14 +1352,30 @@ cdef class FlatStorage(Storage):
 
     cdef np.ndarray toarray(self):
         """Transform stored values into an array"""
-        cdef np.npy_intp shape[3]
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t max_n_classes = self.max_n_classes
+        cdef SIZE_t value_stride = self.value_stride
 
-        shape[0] = <np.npy_intp> self.capacity
-        shape[1] = <np.npy_intp> self.n_outputs
-        shape[2] = <np.npy_intp> self.max_n_classes
+        cdef double* data = self.data
+        cdef SIZE_t capacity = self.capacity
 
-        return np.PyArray_SimpleNewFromData(
-            3, shape, np.NPY_DOUBLE, self.data)
+        cdef np.ndarray[np.float64_t, ndim=3] out
+        out = np.zeros((capacity, n_outputs, max_n_classes),
+                       dtype=np.float64)
+
+        cdef SIZE_t k
+        cdef SIZE_t c
+        cdef SIZE_t i
+        cdef offset = 0
+
+        for i from 0 <= i < capacity:
+            for k from 0 <= k < n_outputs:
+                for c from 0 <= c < n_classes[k]:
+                    out[i, k, c] = data[offset + c]
+                offset += max_n_classes
+
+        return out
 
 
 cdef class SparseCSRStorage(Storage):
@@ -1379,7 +1395,7 @@ cdef class SparseCSRStorage(Storage):
     property nbytes:
         def __get__(self):
             nbytes = super(SparseCSRStorage, self).nbytes
-            nbytes += self.capacity * sizeof(double)  # indptr
+            nbytes += (self.capacity + 1) * sizeof(double)  # indptr
             nbytes += self.capacity_data * sizeof(double)  # data
             nbytes += self.capacity_data * sizeof(SIZE_t)  # indices
             nbytes += self.value_stride * sizeof(double)  # value_buffer
@@ -1393,7 +1409,6 @@ cdef class SparseCSRStorage(Storage):
         self.indptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
         self.indptr[0] = 0
         self.indptr[1] = 0
-        self.capacity = 1
 
     def __dealloc__(self):
         free(self.data)
@@ -1414,7 +1429,7 @@ cdef class SparseCSRStorage(Storage):
         d = super(SparseCSRStorage, self).__getstate__()
         d["capacity_data"] = self.capacity_data
         d["node_count"] = self.node_count
-        d["indptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
+        d["indptr"] = sizet_ptr_to_ndarray(self.indptr, (self.capacity + 1))
         d["indices"] = sizet_ptr_to_ndarray(self.indices, self.capacity_data)
         d["data"] = double_ptr_to_ndarray(self.data, self.capacity_data)
         return d
@@ -1429,7 +1444,7 @@ cdef class SparseCSRStorage(Storage):
 
         # Depend on capacity
         cdef SIZE_t* indptr = <SIZE_t*> (<np.ndarray> d["indptr"]).data
-        memcpy(self.indptr, indptr, self.capacity * sizeof(SIZE_t))
+        memcpy(self.indptr, indptr, (self.capacity + 1) * sizeof(SIZE_t))
 
         # Depend on capacity_data
         cdef SIZE_t* indices = <SIZE_t*> (<np.ndarray> d["indices"]).data
@@ -1467,13 +1482,11 @@ cdef class SparseCSRStorage(Storage):
 
     cdef void resize(self, SIZE_t capacity):
         """Resize storage to at capacity node"""
-        capacity = capacity + 1
-
-        if capacity == self.capacity:
+        if capacity <= self.capacity:
             self.resize_data(self.indptr[self.node_count + 1])
             return
 
-        cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, capacity * sizeof(SIZE_t))
+        cdef SIZE_t* tmp_indptr = <SIZE_t*> realloc(self.indptr, (capacity + 1) * sizeof(SIZE_t))
         if tmp_indptr != NULL:
             self.indptr = tmp_indptr
 
@@ -1481,7 +1494,7 @@ cdef class SparseCSRStorage(Storage):
             raise MemoryError()
 
         # Wee need always one more value for last ptr
-        self.capacity =capacity
+        self.capacity = capacity
 
     cdef void add_node(self, SIZE_t node_id):
         """Ad the node value in storage with id set to node_ids
@@ -1591,9 +1604,10 @@ cdef class SparseCSRStorage(Storage):
         cdef SIZE_t j
 
         cdef np.ndarray[np.float64_t, ndim=3] out
-        out = np.zeros((capacity, n_outputs, max_n_classes), dtype=np.float64)
+        out = np.zeros((node_count + 1, n_outputs, max_n_classes),
+                       dtype=np.float64)
 
-        for i from 0 <= i < node_count:
+        for i from 0 <= i <= node_count:
             for j from indptr[i] <= j < indptr[i + 1]:
                 c = indices[j] % max_n_classes
                 k = indices[j] / max_n_classes
@@ -1821,7 +1835,7 @@ cdef class CompressedStorage(Storage):
             offset = 0
             for k from 0 <= k < n_outputs:
                 for c from 0 <= c < n_classes[k]:
-                    if value_buffer[offset + c] != 0:
+                    if value_buffer[offset + c] != 0.:
                         data[n_data] = value_buffer[offset + c]
                         indices[n_indices] = offset + c
                         n_data += 1
@@ -1902,7 +1916,6 @@ cdef class CompressedStorage(Storage):
                         k = indices[offset_indices_ptr + j] / max_n_classes
                         out_multi[i, k, c] = data[offset_indptr + j]
 
-            print self.toarray()
             return out_multi
 
     cdef np.ndarray toarray(self):
