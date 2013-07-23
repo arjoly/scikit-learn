@@ -1447,7 +1447,7 @@ cdef class SparseCSRStorage(Storage):
 
         if capacity_data < 0:
             if self.capacity_data <= 0:
-                capacity_data = self.value_stride  # default initial value
+                capacity_data = max(self.value_stride, 2048)  # default initial value
             else:
                 capacity_data = 2 * self.capacity_data
 
@@ -1727,7 +1727,7 @@ cdef class CompressedStorage(Storage):
 
         if capacity_data < 0:
             if self.capacity_data <= 0:
-                capacity_data = self.value_stride  # default initial value
+                capacity_data = max(self.value_stride, 2048)  # default initial value
             else:
                 capacity_data = 2 * self.capacity_data
 
@@ -1748,7 +1748,7 @@ cdef class CompressedStorage(Storage):
 
         if capacity_indices < 0:
             if self.capacity_indices <= 0:
-                capacity_indices = self.value_stride  # default initial value
+                capacity_indices = max(self.value_stride, 2048)  # default initial value
             else:
                 capacity_indices = 2 * self.capacity_indices
 
