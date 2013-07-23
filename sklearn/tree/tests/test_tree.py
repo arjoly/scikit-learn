@@ -642,7 +642,7 @@ def test_sample_weight():
 
 def test_storage_value_stored():
     """Check that differents storage scheme give the same value"""
-    n_samples = 2  # with more sample, we will have more nodes than we want
+    n_samples = 20
     n_features = 1
 
     rng = check_random_state(9)
@@ -652,17 +652,14 @@ def test_storage_value_stored():
     clf = DecisionTreeClassifier(random_state=1, storage="flat",
                                  max_depth=1)
     clf.fit(X, y)
-    value_ref = clf.tree_.value[1:]  # Value at node may be very different
+    value_ref = clf.predict(X)  # Value at node may be very different
 
     for storage in ["compressed"]:
         clf = DecisionTreeClassifier(random_state=1, storage=storage,
                                      max_depth=1)
         clf.fit(X, y)
-        value = clf.tree_.value[1:]
+        value = clf.predict(X)
         assert_array_almost_equal(value, value_ref,
                                   err_msg="Failed same value with storage "
                                           "{0} and {1}"
                                           "".format("flat", storage))
-
-if __name__ == "__main__":
-    test_regression_toy()

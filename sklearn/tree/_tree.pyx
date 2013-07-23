@@ -1184,6 +1184,7 @@ cdef class RandomSplitter(Splitter):
         feature[0] = best_feature
         threshold[0] = best_threshold
 
+
 # =============================================================================
 # Storage
 # =============================================================================
@@ -1191,7 +1192,9 @@ cdef class Storage:
 
     property nbytes:
         def __get__(self):
-            nbytes = (5 + self.n_outputs) * sizeof(SIZE_t)
+            # max_n_classes, value_stride, n_outputs, n_classes_
+            nbytes = (3 + self.n_outputs) * sizeof(SIZE_t)
+            nbytes += self.capacity_data * sizeof(double)
             return nbytes
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
@@ -1213,6 +1216,7 @@ cdef class Storage:
     def __dealloc__(self):
         """Destructor."""
         free(self.n_classes)
+        free(self.data)
 
     def __reduce__(self):
         """Reduce re-implementation, for pickling."""
@@ -1225,16 +1229,42 @@ cdef class Storage:
     def __getstate__(self):
         """Getstate re-implementation, for pickling."""
         d = {}
-        d["capacity"] = self.capacity
+        d["capacity_data"] = self.capacity_data
+        d["data"] = double_ptr_to_ndarray(self.data, self.capacity_data)
         return d
 
     def __setstate__(self, d):
         """Setstate re-implementation, for unpickling."""
-        self.resize(d["capacity"])
-        self.capacity = d["capacity"]
+        # NB capacity data must be handle by the subclass
+        self.resize_data(d["capacity_data"])
+        self.capacity_data = d["capacity_data"]
 
+        cdef double* data = <double*> (<np.ndarray> d["data"]).data
+        memcpy(self.data, data, self.capacity_data * sizeof(double))
 
     # Methods
+    cdef void resize_data(self, SIZE_t capacity_data):
+        """Resize data to capacity_data, if capacity_data <= 0, size is double
+        """
+        if capacity_data == self.capacity_data:
+            return
+
+        if capacity_data < 0:
+            if self.capacity_data <= 0:
+                # default initial value
+                capacity_data = max(self.value_stride, 2048)
+            else:
+                capacity_data = 2 * self.capacity_data
+
+        self.capacity_data = capacity_data
+
+        cdef double* tmp_data = <double*> realloc(self.data, capacity_data  * sizeof(double))
+        if tmp_data != NULL:
+            self.data = tmp_data
+
+        if ((tmp_data == NULL)):
+            raise MemoryError()
+
     cdef void resize(self, SIZE_t capacity):
         """Resize storage to at capacity node"""
         pass
@@ -1247,25 +1277,10 @@ cdef class Storage:
         """Get node values for given node_ids"""
         pass
 
-    cdef np.ndarray toarray(self):
-        """Transform stored values into an array"""
-        pass
-
 
 cdef class FlatStorage(Storage):
     """ Flat storage - no memory optimization
     """
-    cdef double* data
-
-    property nbytes:
-        def __get__(self):
-            nbytes = super(FlatStorage, self).nbytes
-            nbytes += self.capacity * self.value_stride *sizeof(double)
-            return nbytes
-
-    def __dealloc__(self):
-        """Destructor."""
-        free(self.data)
 
     def __reduce__(self):
         """Reduce re-implementation, for pickling."""
@@ -1275,33 +1290,9 @@ cdef class FlatStorage(Storage):
                  sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
                 self.__getstate__())
 
-    def __getstate__(self):
-        """Getstate re-implementation, for pickling."""
-        d = super(FlatStorage, self).__getstate__()
-        d["data"] = double_ptr_to_ndarray(self.data, self.capacity * self.value_stride)
-        return d
-
-    def __setstate__(self, d):
-        """Setstate re-implementation, for unpickling."""
-        super(FlatStorage, self).__setstate__(d)
-
-        cdef double* data = <double*> (<np.ndarray> d["data"]).data
-        memcpy(self.data, data, self.capacity * self.value_stride * sizeof(double))
-
-
     cdef void resize(self, SIZE_t capacity):
         """Resize storage to at capacity node"""
-        if capacity == self.capacity:
-            return
-
-        self.capacity = capacity
-
-        cdef double* tmp_data = <double*> realloc(self.data, capacity * self.value_stride * sizeof(double))
-        if tmp_data != NULL:
-            self.data = tmp_data
-
-        if (tmp_data == NULL):
-            raise MemoryError()
+        self.resize_data(capacity * self.value_stride)
 
     cdef void add_node(self, SIZE_t node_id):
         """Ad the node value in storage with id set to node_ids"""
@@ -1350,55 +1341,23 @@ cdef class FlatStorage(Storage):
 
             return out_multi
 
-    cdef np.ndarray toarray(self):
-        """Transform stored values into an array"""
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t max_n_classes = self.max_n_classes
-        cdef SIZE_t value_stride = self.value_stride
-
-        cdef double* data = self.data
-        cdef SIZE_t capacity = self.capacity
-
-        cdef np.ndarray[np.float64_t, ndim=3] out
-        out = np.zeros((capacity, n_outputs, max_n_classes),
-                       dtype=np.float64)
-
-        cdef SIZE_t k
-        cdef SIZE_t c
-        cdef SIZE_t i
-        cdef offset = 0
-
-        for i from 0 <= i < capacity:
-            for k from 0 <= k < n_outputs:
-                for c from 0 <= c < n_classes[k]:
-                    out[i, k, c] = data[offset + c]
-                offset += max_n_classes
-
-        return out
-
 
 cdef class CompressedStorage(Storage):
     # Dense + CSR datastructure
-    cdef double* data
     cdef SIZE_t* indices
     cdef SIZE_t* indices_ptr
     cdef SIZE_t* indptr
 
-    cdef SIZE_t capacity_data  # Maximal capacity of the csr structure
-    cdef SIZE_t capacity_indices  # Maximal capacity of the csr structure
-    cdef SIZE_t node_count  # Number of saved nodes
-
-    cdef bint try_to_compress
+    cdef SIZE_t capacity
+    cdef SIZE_t capacity_indices
+    cdef SIZE_t node_count
 
     property nbytes:
         def __get__(self):
             nbytes = super(CompressedStorage, self).nbytes
             nbytes += 2 * self.capacity * sizeof(double)  # indptr & indices_ptr
-            nbytes += self.capacity_data * sizeof(double)  # data
             nbytes += self.capacity_indices * sizeof(SIZE_t)  # indices
-            nbytes += self.value_stride * sizeof(double)  # value_buffer
-            nbytes += 3 * sizeof(SIZE_t) # capacity_{data, indices} + node_count
+            nbytes += 2 * sizeof(SIZE_t) # capacity_indices + node_count
             return nbytes
 
     def __cinit__(self, Splitter splitter, SIZE_t n_outputs,
@@ -1407,22 +1366,14 @@ cdef class CompressedStorage(Storage):
         self.indptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
         self.indptr[0] = 0
         self.indptr[1] = 0
-        self.indices_ptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
 
+        self.indices_ptr = <SIZE_t*> malloc(2 * sizeof(SIZE_t))
         self.indices_ptr[0] = 0
         self.indices_ptr[1] = 0
-
-        self.capacity = 1
-
-        if self.max_n_classes <= 2:
-            self.try_to_compress = False
-        else:
-            self.try_to_compress = True
 
 
     def __dealloc__(self):
         """Destructor."""
-        free(self.data)
         free(self.indices)
         free(self.indices_ptr)
         free(self.indptr)
@@ -1439,24 +1390,23 @@ cdef class CompressedStorage(Storage):
         """Getstate re-implementation, for pickling."""
         d = super(CompressedStorage, self).__getstate__()
         d["node_count"] = self.node_count
-        d["capacity_data"] = self.capacity_data
+        d["capacity"] = self.capacity
         d["capacity_indices"] = self.capacity_indices
 
         d["indptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
         d["indices_ptr"] = sizet_ptr_to_ndarray(self.indptr, self.capacity)
         d["indices"] = sizet_ptr_to_ndarray(self.indices, self.capacity_indices)
-        d["data"] = double_ptr_to_ndarray(self.data, self.capacity_data)
         return d
 
     def __setstate__(self, d):
         """Setstate re-implementation, for unpickling."""
         super(CompressedStorage, self).__setstate__(d)
 
-        self.resize_data(d["capacity_data"])
         self.resize_indices(d["capacity_indices"])
+        self.resize(d["capacity"])
 
-        self.capacity_data = d["capacity_data"]
         self.capacity_indices = d["capacity_indices"]
+        self.capacity = d["capacity"]
         self.node_count = d["node_count"]
 
         # Depend on capacity
@@ -1466,12 +1416,9 @@ cdef class CompressedStorage(Storage):
         cdef SIZE_t* indices_ptr = <SIZE_t*> (<np.ndarray> d["indices_ptr"]).data
         memcpy(self.indices_ptr, indices_ptr, self.capacity * sizeof(SIZE_t))
 
-        # Depend on capacity_data
+        # Depend on capacity_indices
         cdef SIZE_t* indices = <SIZE_t*> (<np.ndarray> d["indices"]).data
         memcpy(self.indices, indices, self.capacity_indices * sizeof(SIZE_t))
-
-        cdef double* data = <double*> (<np.ndarray> d["data"]).data
-        memcpy(self.data, data, self.capacity_data * sizeof(double))
 
     # Methods
     cdef void resize(self, SIZE_t capacity):
@@ -1496,27 +1443,7 @@ cdef class CompressedStorage(Storage):
             raise MemoryError()
 
         # Wee need always one more value for last ptr
-        self.capacity =capacity
-
-    cdef void resize_data(self, SIZE_t capacity_data):
-        """Resize data array to "capacity_data", if -1 double size"""
-        if capacity_data == self.capacity_data:
-            return
-
-        if capacity_data < 0:
-            if self.capacity_data <= 0:
-                capacity_data = max(self.value_stride, 2048)  # default initial value
-            else:
-                capacity_data = 2 * self.capacity_data
-
-        self.capacity_data = capacity_data
-
-        cdef double* tmp_data = <double*> realloc(self.data, capacity_data  * sizeof(double))
-        if tmp_data != NULL:
-            self.data = tmp_data
-
-        if ((tmp_data == NULL)):
-            raise MemoryError()
+        self.capacity = capacity
 
 
     cdef void resize_indices(self, SIZE_t capacity_indices):
@@ -1588,8 +1515,7 @@ cdef class CompressedStorage(Storage):
             indices_ptr[n] = n_indices
 
         # Compute sparsity of value buffer
-
-        if self.try_to_compress:
+        if self.max_n_classes > 2:
             counter = 0
             for k from 0 <= k < value_stride:
                 if value_buffer[k] != 0.:
@@ -1687,50 +1613,6 @@ cdef class CompressedStorage(Storage):
 
             return out_multi
 
-    cdef np.ndarray toarray(self):
-        """Transform stored values into an array"""
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t max_n_classes = self.max_n_classes
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t value_stride = self.value_stride
-
-        cdef SIZE_t* indptr = self.indptr
-        cdef SIZE_t* indices = self.indices
-        cdef SIZE_t* indices_ptr = self.indices_ptr
-        cdef double* data = self.data
-        cdef SIZE_t capacity = self.capacity
-        cdef SIZE_t capacity_data = self.capacity_data
-        cdef SIZE_t capacity_indices = self.capacity_indices
-        cdef SIZE_t node_count = self.node_count
-
-        cdef SIZE_t i
-        cdef SIZE_t k
-        cdef SIZE_t j
-        cdef SIZE_t offset_indices
-        cdef SIZE_t offset_indptr
-
-        cdef np.ndarray[np.float64_t, ndim=3] out
-        out = np.zeros((node_count + 1, n_outputs, max_n_classes),
-                       dtype=np.float64)
-
-        for i from 0 <= i <= node_count:
-            offset_indices = indices_ptr[i]
-            offset_indptr = indptr[i]
-
-            if (indptr[i + 1] - offset_indptr) == value_stride:
-               for k from 0 <= k < n_outputs:
-                    for c from 0 <= c < n_classes[k]:
-                        out[i, k, c] = data[offset_indptr + c]
-                    offset_indptr += max_n_classes
-
-            else:
-
-                for j from 0 <= j < (indptr[i + 1] - indptr[i]):
-                    c = indices[offset_indices + j] % max_n_classes
-                    k = indices[offset_indices + j] / max_n_classes
-                    out[i, k, c] = data[offset_indptr + j]
-
-        return out
 
 # =============================================================================
 # Tree

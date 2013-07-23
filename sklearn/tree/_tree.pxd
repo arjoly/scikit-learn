@@ -99,20 +99,25 @@ cdef class Splitter:
 # =============================================================================
 
 cdef class Storage:
-    cdef Splitter splitter
-    cdef SIZE_t capacity                # Maximal number of nodes that can be
-                                        # stored
-    cdef SIZE_t nbytes           # Total number of bytes used by Storage
-    cdef SIZE_t n_outputs               # Number of outputs in y
+    cdef public Splitter splitter
+
+    # Parameters
+    cdef SIZE_t nbytes                  # Total number of bytes used by Storage
+    cdef public SIZE_t n_outputs        # Number of outputs in y
     cdef SIZE_t* n_classes              # Number of classes in y[:, k]
-    cdef SIZE_t max_n_classes           # max(n_classes)
-    cdef SIZE_t value_stride            # n_output * max_n_classes
+    cdef public SIZE_t max_n_classes    # max(n_classes)
+    cdef public SIZE_t value_stride     # n_output * max_n_classes
+
+    # Data - data usage is subclass dependant
+    cdef double* data                   # Storage of the data
+    cdef public SIZE_t capacity_data    # Size of the data vector
+
 
     # Methods
+    cdef void resize_data(self, SIZE_t capacity_data)
     cdef void resize(self, SIZE_t capacity)
     cdef void add_node(self, SIZE_t node_id)
     cdef np.ndarray node_value(self, SIZE_t* node_ids, SIZE_t n_samples)
-    cdef np.ndarray toarray(self)
 
 
 # =============================================================================
