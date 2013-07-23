@@ -34,21 +34,22 @@ REG_CRITERIONS = ("mse", )
 
 CLF_TREES = {
     "DecisionTreeClassifier": DecisionTreeClassifier,
-    # Dense storage
+    "DecisionTreeClassifier_storage=compressed":
+    partial(DecisionTreeClassifier, storage="compressed"),
+
     "ExtraTreeClassifier": ExtraTreeClassifier,
     "ExtraTreeClassifier_storage=compressed":
     partial(ExtraTreeClassifier, storage="compressed"),
-    "ExtraTreeClassifier_storage=sparse_csr":
-    partial(ExtraTreeClassifier, storage="sparse_csr"),
 }
 
 REG_TREES = {
     "DecisionTreeRegressor": DecisionTreeRegressor,
+    "DecisionTreeRegressor_storage=compressed":
+    partial(DecisionTreeRegressor, storage="compressed"),
+
     "ExtraTreeRegressor": ExtraTreeRegressor,
     "ExtraTreeRegressor_storage=compressed":
     partial(ExtraTreeRegressor, storage="compressed"),
-    "ExtraTreeRegressor_storage=sparse_csr":
-    partial(ExtraTreeRegressor, storage="sparse_csr"),
 }
 
 ALL_TREES = dict()
@@ -653,7 +654,7 @@ def test_storage_value_stored():
     clf.fit(X, y)
     value_ref = clf.tree_.value[1:]  # Value at node may be very different
 
-    for storage in ["sparse_csr", "compressed"]:
+    for storage in ["compressed"]:
         clf = DecisionTreeClassifier(random_state=1, storage=storage,
                                      max_depth=1)
         clf.fit(X, y)
