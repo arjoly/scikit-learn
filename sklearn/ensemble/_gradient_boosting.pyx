@@ -142,7 +142,7 @@ def predict_stages(np.ndarray[object, ndim=2] estimators,
                 tree.children_right,
                 tree.feature,
                 tree.threshold,
-                tree.value,
+                tree.storage.data, # we assume flat storage of node values
                 scale, k, K, n_samples, n_features,
                 <float64*>((<np.ndarray>out).data))
             ## out += scale * tree.predict(X).reshape((X.shape[0], 1))
@@ -174,7 +174,7 @@ def predict_stage(np.ndarray[object, ndim=2] estimators,
                 tree.children_right,
                 tree.feature,
                 tree.threshold,
-                tree.value,
+                tree.storage.data, # we assume flat storage of node values
                 scale, k, K, n_samples, n_features,
                 <float64*>((<np.ndarray>out).data))
         ## out += scale * tree.predict(X).reshape((X.shape[0], 1))
@@ -232,7 +232,7 @@ cpdef _partial_dependence_tree(Tree tree, DTYPE_t[:, ::1] X,
     cdef SIZE_t *children_left = tree.children_left
     cdef SIZE_t *children_right = tree.children_right
     cdef SIZE_t *feature = tree.feature
-    cdef double *value = tree.value
+    cdef double *value = tree.storage.data # We assume flat storage
     cdef double *threshold = tree.threshold
     cdef SIZE_t *n_node_samples = tree.n_node_samples
     cdef SIZE_t node_count = tree.node_count

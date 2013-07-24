@@ -34,8 +34,8 @@ REG_CRITERIONS = ("mse", )
 
 CLF_TREES = {
     "DecisionTreeClassifier": DecisionTreeClassifier,
-    "DecisionTreeClassifier_storage=compressed":
-    partial(DecisionTreeClassifier, storage="compressed"),
+    # "DecisionTreeClassifier_storage=compressed":
+    # partial(DecisionTreeClassifier, storage="compressed"),
 
     "ExtraTreeClassifier": ExtraTreeClassifier,
     "ExtraTreeClassifier_storage=compressed":
@@ -118,7 +118,10 @@ def test_classification_toy():
     """Check classification on a toy dataset."""
     for name, Tree in CLF_TREES.items():
         clf = Tree(random_state=0)
+        print ("FIT-------------- %s" % name)
         clf.fit(X, y)
+
+        print ("PREDICT--------------")
         assert_array_equal(clf.predict(T), true_result,
                            "Failed with {0}".format(name))
 
@@ -684,3 +687,6 @@ def test_regression_storage_value_stored():
                                   err_msg="Failed same value with storage "
                                           "{0} and {1}"
                                           "".format("flat", storage))
+
+if __name__ == "__main__":
+    test_classification_toy()

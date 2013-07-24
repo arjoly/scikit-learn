@@ -468,6 +468,7 @@ class BaseGradientBoosting(six.with_metaclass(ABCMeta, BaseEnsemble)):
             # induce regression tree on residuals
             tree = DecisionTreeRegressor(
                 criterion="mse",
+                storage="flat",
                 max_depth=self.max_depth,
                 min_samples_split=self.min_samples_split,
                 min_samples_leaf=self.min_samples_leaf,
