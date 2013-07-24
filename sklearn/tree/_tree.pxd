@@ -112,7 +112,6 @@ cdef class Storage:
     cdef double* data                   # Storage of the data
     cdef public SIZE_t capacity_data    # Size of the data vector
 
-
     # Methods
     cdef void resize_data(self, SIZE_t capacity_data)
     cdef void resize(self, SIZE_t capacity)

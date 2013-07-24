@@ -649,14 +649,35 @@ def test_storage_value_stored():
     X = rng.normal(size=(n_samples, n_features))
     y = np.vstack([np.arange(n_samples) for _ in range(3)]).T
 
-    clf = DecisionTreeClassifier(random_state=1, storage="flat",
-                                 max_depth=1)
+    clf = DecisionTreeClassifier(random_state=1, storage="flat")
     clf.fit(X, y)
     value_ref = clf.predict(X)  # Value at node may be very different
 
     for storage in ["compressed"]:
-        clf = DecisionTreeClassifier(random_state=1, storage=storage,
-                                     max_depth=1)
+        clf = DecisionTreeClassifier(random_state=1, storage=storage)
+        clf.fit(X, y)
+        value = clf.predict(X)
+        assert_array_almost_equal(value, value_ref,
+                                  err_msg="Failed same value with storage "
+                                          "{0} and {1}"
+                                          "".format("flat", storage))
+
+
+def test_regression_storage_value_stored():
+    """Check that differents storage scheme give the same value"""
+    n_samples = 20
+    n_features = 1
+
+    rng = check_random_state(9)
+    X = rng.normal(size=(n_samples, n_features))
+    y = rng.normal(size=(n_samples, 1))
+
+    clf = DecisionTreeRegressor(random_state=1, storage="flat")
+    clf.fit(X, y)
+    value_ref = clf.predict(X)  # Value at node may be very different
+
+    for storage in ["compressed"]:
+        clf = DecisionTreeClassifier(random_state=1, storage=storage)
         clf.fit(X, y)
         value = clf.predict(X)
         assert_array_almost_equal(value, value_ref,
