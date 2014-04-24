@@ -22,6 +22,7 @@ from __future__ import division
 
 import warnings
 import numpy as np
+from numpy.lib.stride_tricks import broadcast_arrays
 
 from scipy.sparse import coo_matrix
 from scipy.spatial.distance import hamming as sp_hamming
@@ -2215,35 +2216,16 @@ def label_ranking_average_precision_score(y_true, y_score):
             and not (y_type == "binary" and y_true.ndim == 2)):
         raise ValueError("{0} format is not supported".format(y_type))
 
-    n_samples, n_labels = y_true.shape
+    # count the number of scores better than each score (per sample)
+    better = (y_score[:, :, None] >= y_score[:, None, :] - 1e-5)
 
-    score = 0.
-    for i in range(n_samples):
-        relevant = y_true[i].nonzero()[0]
+    true_mask = ~y_true.astype(bool)
+    true_mask2 = broadcast_arrays(better, true_mask[:, :, None])[-1]
 
-        # No relevant label, so we will have to sum over zero element
-        # and divide by 0. But lim_{x->0} x/x = 1.
-        # If all labels are relevant, the score is also equal to 1.
-        if (relevant.size == 0 or relevant.size == n_labels):
-            score += 1.
-            continue
-
-        # Compute denominators
-        unique_all, inverse = np.unique(y_score[i], return_inverse=True)
-        count = np.bincount(inverse, minlength=unique_all.size)
-        cum_count = count[::-1].cumsum()[::-1]  # reverse cumsum
-
-        # Compute numerators
-        unique_relevant, relevant_inverse = np.unique(y_score[i, relevant],
-                                                      return_inverse=True)
-        count_relevant = np.bincount(relevant_inverse,
-                                     minlength=unique_relevant.size)
-        cum_count_relevant = count_relevant[::-1].cumsum()[::-1]
-
-        score += (cum_count_relevant[relevant_inverse] /
-                  cum_count[inverse[relevant]]).mean()
-
-    return score / n_samples
+    L = np.ma.masked_array(better, mask=true_mask2).sum(axis=1)
+    rank = np.ma.masked_array(better.sum(axis=1), mask=true_mask)
+    precision = np.divide(L, rank, dtype=float).mean(axis=-1).filled(1)
+    return precision.mean()
 
 
 ###############################################################################
