@@ -25,6 +25,7 @@ import numpy as np
 
 from scipy.sparse import coo_matrix
 from scipy.spatial.distance import hamming as sp_hamming
+from scipy import stats
 
 from ..externals.six.moves import zip
 from ..externals.six.moves import xrange as range
@@ -2217,7 +2218,7 @@ def label_ranking_average_precision_score(y_true, y_score):
 
     n_samples, n_labels = y_true.shape
 
-    score = 0.
+    out = 0.
     for i in range(n_samples):
         relevant = y_true[i].nonzero()[0]
 
@@ -2225,25 +2226,16 @@ def label_ranking_average_precision_score(y_true, y_score):
         # and divide by 0. But lim_{x->0} x/x = 1.
         # If all labels are relevant, the score is also equal to 1.
         if (relevant.size == 0 or relevant.size == n_labels):
-            score += 1.
+            out += 1.
             continue
 
-        # Compute denominators
-        unique_all, inverse = np.unique(y_score[i], return_inverse=True)
-        count = np.bincount(inverse, minlength=unique_all.size)
-        cum_count = count[::-1].cumsum()[::-1]  # reverse cumsum
+        score = -y_score[i]
+        true_mask = y_true[i].astype(bool)
+        rank = stats.rankdata(score, 'max')[true_mask]
+        L = stats.rankdata(score[true_mask], 'max')
+        out += np.divide(L, rank, dtype=float).mean()
 
-        # Compute numerators
-        unique_relevant, relevant_inverse = np.unique(y_score[i, relevant],
-                                                      return_inverse=True)
-        count_relevant = np.bincount(relevant_inverse,
-                                     minlength=unique_relevant.size)
-        cum_count_relevant = count_relevant[::-1].cumsum()[::-1]
-
-        score += (cum_count_relevant[relevant_inverse] /
-                  cum_count[inverse[relevant]]).mean()
-
-    return score / n_samples
+    return out / n_samples
 
 
 ###############################################################################
