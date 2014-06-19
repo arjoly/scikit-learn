@@ -148,6 +148,7 @@ def assert_tree_equal(d, s, message):
 def test_classification_toy():
     """Check classification on a toy dataset."""
     for name, Tree in CLF_TREES.items():
+        print(name)
         clf = Tree(random_state=0)
         clf.fit(X, y)
         assert_array_equal(clf.predict(T), true_result,
