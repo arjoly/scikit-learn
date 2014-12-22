@@ -20,12 +20,11 @@ the lower the better
 from __future__ import division
 
 import warnings
+from functools import partial
 import numpy as np
 from scipy.sparse import csr_matrix
 
-from ..preprocessing import LabelBinarizer
 from ..utils import check_consistent_length
-from ..utils import deprecated
 from ..utils import column_or_1d, check_array
 from ..utils.multiclass import type_of_target
 from ..utils.fixes import isclose
@@ -103,8 +102,28 @@ def auc(x, y, reorder=False):
     return area
 
 
+def _binary_average_precision(y_true, y_score, undefined, sample_weight=None):
+    labels = np.unique(y_true)
+
+    if len(labels) == 1 and labels[0] == 0:
+        if undefined == "raise":
+            raise ValueError("Only one class present in y_true. average "
+                             "precision score is not defined in that case.")
+        elif undefined == "skip":
+            return np.nan
+        elif undefined in (0, 1):
+            return undefined
+        else:
+            raise ValueError("Unkown undefined option choose one in "
+                             "(0, 1, \"skip\", \"raise)\"")
+
+    precision, recall, _ = precision_recall_curve(y_true, y_score,
+        sample_weight=sample_weight)
+    return auc(recall, precision)
+
+
 def average_precision_score(y_true, y_score, average="macro",
-                            sample_weight=None):
+                            sample_weight=None, undefined="raise"):
     """Compute average precision (AP) from prediction scores
 
     This score corresponds to the area under the precision-recall curve.
@@ -140,6 +159,16 @@ def average_precision_score(y_true, y_score, average="macro",
     sample_weight : array-like of shape = [n_samples], optional
         Sample weights.
 
+    undefined : {0, 1, 'skip', 'raise' (default)}
+        If the metric is undefined, returns respectively  0, 1, np.nan or
+        raises an error if undefined is respectively 0, 1, 'skip' or 'raise'.
+
+        With multi-label data if for a given sample (e.g.
+        ``averaging="sample"`) or labels (e.g. ``averaging="macro"``)
+        the metric is udefined, then the metric for this sample or label is
+        respectively 0, 1, skipped or raises an error if undefined
+        is respectively 0, 1, 'skip' or 'raise'.
+
     Returns
     -------
     average_precision : float
@@ -166,16 +195,31 @@ def average_precision_score(y_true, y_score, average="macro",
     0.79...
 
     """
-    def _binary_average_precision(y_true, y_score, sample_weight=None):
-        precision, recall, thresholds = precision_recall_curve(
-            y_true, y_score, sample_weight=sample_weight)
-        return auc(recall, precision)
-
-    return _average_binary_score(_binary_average_precision, y_true, y_score,
-                                 average, sample_weight=sample_weight)
+    return _average_binary_score(
+        partial(_binary_average_precision, undefined=undefined),
+        y_true, y_score, average, sample_weight=sample_weight)
 
 
-def roc_auc_score(y_true, y_score, average="macro", sample_weight=None):
+
+def _binary_roc_auc_score(y_true, y_score, undefined, sample_weight=None):
+    if len(np.unique(y_true)) != 2:
+        if undefined == "raise":
+            raise ValueError("Only one class present in y_true. ROC AUC score "
+                             "is not defined in that case.")
+        elif undefined == "skip":
+            return np.nan
+        elif undefined in (0, 1):
+            return undefined
+        else:
+            raise ValueError("Unkown undefined option choose one in "
+                             "(0, 1, \"skip\", \"raise)\"")
+
+    fpr, tpr, _ = roc_curve(y_true, y_score, sample_weight=sample_weight)
+    return auc(fpr, tpr, reorder=True)
+
+
+def roc_auc_score(y_true, y_score, average="macro", sample_weight=None,
+                  undefined="raise"):
     """Compute Area Under the Curve (AUC) from prediction scores
 
     Note: this implementation is restricted to the binary classification task
@@ -209,6 +253,16 @@ def roc_auc_score(y_true, y_score, average="macro", sample_weight=None):
     sample_weight : array-like of shape = [n_samples], optional
         Sample weights.
 
+    undefined : {0, 1, 'skip', 'raise' (default)}
+        If the metric is undefined, returns respectively  0, 1, np.nan or
+        raises an error if undefined is respectively 0, 1, 'skip' or 'raise'.
+
+        With multi-label data if for a given sample (e.g.
+        ``averaging="sample"`) or labels (e.g. ``averaging="macro"``)
+        the metric is udefined, then the metric for this sample or label is
+        respectively 0, 1, skipped or raises an error if undefined
+        is respectively 0, 1, 'skip' or 'raise'.
+
     Returns
     -------
     auc : float
@@ -234,18 +288,9 @@ def roc_auc_score(y_true, y_score, average="macro", sample_weight=None):
     0.75
 
     """
-    def _binary_roc_auc_score(y_true, y_score, sample_weight=None):
-        if len(np.unique(y_true)) != 2:
-            raise ValueError("Only one class present in y_true. ROC AUC score "
-                             "is not defined in that case.")
-
-        fpr, tpr, tresholds = roc_curve(y_true, y_score,
-                                        sample_weight=sample_weight)
-        return auc(fpr, tpr, reorder=True)
-
     return _average_binary_score(
-        _binary_roc_auc_score, y_true, y_score, average,
-        sample_weight=sample_weight)
+        partial(_binary_roc_auc_score, undefined=undefined), y_true, y_score,
+        average, sample_weight=sample_weight)
 
 
 def _binary_clf_curve(y_true, y_score, pos_label=None, sample_weight=None):

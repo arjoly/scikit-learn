@@ -112,6 +112,9 @@ def _average_binary_score(binary_metric, y_true, y_score, average,
 
     n_classes = y_score.shape[not_average_axis]
     score = np.zeros((n_classes,))
+    if average_weight is None:
+        average_weight = np.ones_like(score, dtype=float)
+
     for c in range(n_classes):
         y_true_c = y_true.take([c], axis=not_average_axis).ravel()
         y_score_c = y_score.take([c], axis=not_average_axis).ravel()
@@ -120,6 +123,12 @@ def _average_binary_score(binary_metric, y_true, y_score, average,
 
     # Average the results
     if average is not None:
-        return np.average(score, weights=average_weight)
+        invalid = np.isnan(score)
+
+        if np.all(invalid):
+            return np.nan
+        else:
+            return np.average(score[~invalid],
+                              weights=np.asarray(average_weight)[~invalid])
     else:
         return score

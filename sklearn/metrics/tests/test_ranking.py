@@ -897,3 +897,90 @@ def test_coverage_tie_handling():
     assert_almost_equal(coverage_error([[1, 0, 1]], [[0.25, 0.5, 0.5]]), 3)
     assert_almost_equal(coverage_error([[1, 1, 0]], [[0.25, 0.5, 0.5]]), 3)
     assert_almost_equal(coverage_error([[1, 1, 1]], [[0.25, 0.5, 0.5]]), 3)
+
+
+def test_undefined_roc_auc_score():
+    # Undefined multi-class
+    assert_almost_equal(roc_auc_score([0, 0], [0.25, 0.75], undefined=0), 0)
+    assert_almost_equal(roc_auc_score([0, 0], [0.25, 0.75], undefined=1), 1)
+    assert_almost_equal(roc_auc_score([1, 1], [0.25, 0.75], undefined=0), 0)
+    assert_almost_equal(roc_auc_score([1, 1], [0.25, 0.75], undefined=1), 1)
+
+    # Undefined multi-label
+    y_true = np.array([[0, 0, 0], [0, 1, 0], [1, 0., 0], [0, 0, 0]])
+    y_score = np.arange(y_true.size).reshape(y_true.shape)
+
+    for average, expected in [("micro", 0.45), ("macro", 1 / 3),
+                              ("samples", 0.125), ("weighted", 0.5),
+                              (None, [2 / 3, 1 / 3, 0])]:
+        assert_almost_equal(roc_auc_score(y_true, y_score, undefined=0,
+                                          average=average),
+                            expected)
+
+    for average, expected in [("micro", 0.45), ("macro", 2 / 3),
+                              ("samples", 0.625), ("weighted", 0.5),
+                              (None, [2 / 3, 1 / 3, 1])]:
+        assert_almost_equal(roc_auc_score(y_true, y_score, undefined=1,
+                                          average=average),
+                           expected)
+
+    for average, expected in [("micro", 0.45), ("macro", 0.5),
+                              ("samples", 0.25), ("weighted", 0.5),
+                              (None, [2 / 3, 1 / 3, np.nan])]:
+        assert_almost_equal(roc_auc_score(y_true, y_score, undefined="skip",
+                                          average=average),
+                           expected)
+
+    y_true = np.zeros((4, 3))
+    for undefined, expected in [(0, 0), (1, 1), ("skip", np.nan)]:
+        assert_almost_equal(roc_auc_score(y_true, y_score, undefined=undefined,
+                                          average="micro"),
+                           expected)
+
+def test_undefined_average_precision_score():
+    # Undefined multi-class
+    assert_almost_equal(average_precision_score([0, 0], [0.25, 0.75],
+                                                 undefined=0), 0)
+    assert_almost_equal(average_precision_score([0, 0], [0.25, 0.75],
+                                                undefined=1), 1)
+
+    # Undefined multi-label
+    y_true = np.array([[0, 0, 0], [0, 1, 0], [1, 0., 0], [0, 0, 0]])
+    y_score = np.arange(y_true.size).reshape(y_true.shape)
+
+    for average, expected in [("micro", 0.139880952381),
+                              ("macro", 0.138888888889),
+                              ("samples", 0.104166666667),
+                              ("weighted", 0.208333333333),
+                              (None, [0.25, 0.16666667, 0.])]:
+        assert_almost_equal(average_precision_score(y_true, y_score,
+                                                    undefined=0,
+                                                    average=average),
+                            expected)
+
+    for average, expected in [("micro", 0.139880952381),
+                              ("macro", 0.472222222222),
+                              ("samples", 0.604166666667),
+                              ("weighted", 0.208333333333),
+                              (None, [0.25, 0.16666667, 1])]:
+        assert_almost_equal(average_precision_score(y_true, y_score,
+                                                    undefined=1,
+                                                    average=average),
+                            expected)
+
+    for average, expected in [("micro", 0.139880952381),
+                              ("macro", 0.208333333333),
+                              ("samples", 0.208333333333),
+                              ("weighted", 0.208333333333),
+                              (None, [0.25, 0.16666667, np.nan])]:
+        assert_almost_equal(average_precision_score(y_true, y_score,
+                                                    undefined="skip",
+                                                    average=average),
+                            expected)
+
+    y_true = np.zeros((4, 3))
+    for undefined, expected in [(0, 0), (1, 1), ("skip", np.nan)]:
+        assert_almost_equal(average_precision_score(y_true, y_score,
+                                                    undefined=undefined,
+                                                    average="micro"),
+                            expected)
