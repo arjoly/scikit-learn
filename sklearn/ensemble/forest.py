@@ -179,7 +179,7 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         """
         check_is_fitted(self, 'n_outputs_')
 
-        X = check_array(X, dtype=DTYPE, accept_sparse="csr")
+        X = check_array(X, dtype=DTYPE, accept_sparse=["csr", "csc"])
         results = Parallel(n_jobs=self.n_jobs, verbose=self.verbose,
                            backend="threading")(
             delayed(_parallel_helper)(tree.tree_, 'apply', X)

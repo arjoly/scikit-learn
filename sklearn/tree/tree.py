@@ -587,7 +587,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             classes corresponds to that in the attribute `classes_`.
         """
         check_is_fitted(self, 'n_outputs_')
-        X = check_array(X, dtype=DTYPE, accept_sparse="csr")
+        X = check_array(X, dtype=DTYPE, accept_sparse=["csr", "csc"])
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
             raise ValueError("No support for np.int64 index based "

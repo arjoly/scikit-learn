@@ -3215,7 +3215,12 @@ cdef class Tree:
     cpdef np.ndarray apply(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
         if issparse(X):
-            return self._apply_sparse_csr(X)
+            if isinstance(X, csr_matrix):
+                return self._apply_sparse_csr(X)
+            elif isinstance(X, csc_matrix):
+                return self._apply_sparse_csc(X)
+            else:
+                raise ValueError("Sparse format is not supported.")
         else:
             return self._apply_dense(X)
 
@@ -3261,6 +3266,145 @@ cdef class Tree:
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
         return out
+
+    cdef inline np.ndarray _apply_sparse_csc(self, object X):
+        """Finds the terminal region (=leaf node) for samples in a csc matrix.
+
+        """
+        # Check input
+        if not isinstance(X, csc_matrix):
+            raise ValueError("X should be in csr_matrix format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        # Extract input
+        cdef np.ndarray[ndim=1, dtype=DTYPE_t] X_data_ndarray = X.data
+        cdef np.ndarray[ndim=1, dtype=INT32_t] X_indices_ndarray  = X.indices
+        cdef np.ndarray[ndim=1, dtype=INT32_t] X_indptr_ndarray  = X.indptr
+
+        cdef DTYPE_t* X_data = <DTYPE_t*>X_data_ndarray.data
+        cdef INT32_t* X_indices = <INT32_t*>X_indices_ndarray.data
+        cdef INT32_t* X_indptr = <INT32_t*>X_indptr_ndarray.data
+
+        cdef SIZE_t n_samples = X.shape[0]
+        cdef SIZE_t n_features = X.shape[1]
+
+        # Initialize output
+        cdef np.ndarray[SIZE_t, ndim=1] out = np.zeros((n_samples,),
+                                                       dtype=np.intp)
+        cdef SIZE_t* out_ptr = <SIZE_t*> out.data
+
+        # Recursive partition (without actual recursion)
+        # We re-use tree stack
+        cdef Stack stack = Stack(INITIAL_STACK_SIZE)
+        cdef StackRecord stack_record
+        cdef SIZE_t start = 0
+        cdef SIZE_t end_negative = 0
+        cdef SIZE_t start_positive = n_samples
+        cdef SIZE_t end = n_samples
+        cdef SIZE_t parent = 0
+        cdef SIZE_t depth = 0
+        cdef SIZE_t partition_end = 0
+        cdef SIZE_t pos = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t feature = 0
+        cdef double value = 0.
+
+        # Initialize auxiliary data-structure
+        cdef SIZE_t* samples = NULL
+        safe_realloc(&samples, n_samples)
+
+        cdef DTYPE_t* feature_values = NULL
+        safe_realloc(&feature_values, n_samples)
+
+        cdef SIZE_t* index_to_samples = NULL
+        safe_realloc(&index_to_samples, n_samples)
+
+        for p in range(n_samples):
+            samples[p] = p
+            index_to_samples[p] = p
+
+        cdef int rc = 0
+
+        # push root node onto stack
+        rc = stack.push(start, end, depth, parent, 0, INFINITY, 0)
+        if rc == -1:
+            # got return code -1 - out-of-memory
+            raise MemoryError()
+
+        cdef Node* nodes = self.nodes
+        cdef Node node
+
+        with nogil:
+            while not stack.is_empty():
+                stack.pop(&stack_record)
+
+                start = stack_record.start
+                end = stack_record.end
+                depth = stack_record.depth
+                parent = stack_record.parent
+                node = nodes[parent]
+
+                if node.left_child == _TREE_LEAF:
+                        # ... and node.right_child == _TREE_LEAF:
+                    for p in range(start, end):
+                        out_ptr[samples[p]] = parent  # node offset
+                else:
+                    # Extra nnz values
+                    # XXX: could re-use the binary search if it's faster
+                    #      in the case where some columns are highly dense.
+                    extract_nnz_index_to_samples(X_indices, X_data,
+                                                 X_indptr[node.feature],
+                                                 X_indptr[node.feature + 1],
+                                                 samples, start, end,
+                                                 index_to_samples,
+                                                 feature_values,
+                                                 &end_negative,
+                                                 &start_positive)
+
+                    # Partition samples[start:end] given node.features and
+                    # node.threshold
+                    if node.threshold < 0.:
+                        p = start
+                        partition_end = end_negative
+                    elif node.threshold > 0.:
+                        p = start_positive
+                        partition_end = end
+                    else:
+                        # Data are already split
+                        partition_end = start_positive
+                        p = partition_end
+
+                    while p < partition_end:
+                        value = feature_values[p]
+
+                        if value <= node.threshold:
+                            p += 1
+
+                        else:
+                            partition_end -= 1
+
+                            feature_values[p] = feature_values[partition_end]
+                            feature_values[partition_end] = value
+                            sparse_swap(index_to_samples, samples, p, partition_end)
+
+                    rc = stack.push(partition_end, end, depth + 1,
+                                    node.right_child, 1, INFINITY, 0)
+                    if rc == -1:
+                        break
+
+                    rc = stack.push(start, partition_end, depth + 1,
+                                    node.left_child, 0, INFINITY, 0)
+                    if rc == -1:
+                        break
+
+        if rc == -1:
+            raise MemoryError()
+
+        return out
+
 
     cdef inline np.ndarray _apply_sparse_csr(self, object X):
         """Finds the terminal region (=leaf node) for each sample in sparse X.
