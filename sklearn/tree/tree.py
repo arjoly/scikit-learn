@@ -15,6 +15,7 @@ randomized trees. Single and multi-output problems are both handled.
 
 from __future__ import division
 
+import sys
 
 import numbers
 from abc import ABCMeta, abstractmethod
@@ -33,6 +34,8 @@ from ._tree import Splitter
 from ._tree import DepthFirstTreeBuilder, BestFirstTreeBuilder
 from ._tree import Tree
 from . import _tree
+
+from tree_pruning import Desision
 
 __all__ = ["DecisionTreeClassifier",
            "DecisionTreeRegressor",
@@ -370,6 +373,26 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                              "call `fit` before `feature_importances_`.")
 
         return self.tree_.compute_feature_importances()
+
+    def random_pruning(self, proba=0.1):
+        """Excute a post pruning method on a tree
+        """
+        if self.tree_ is None:
+            raise Exception("Tree not initialized. Perform a fit first")
+
+        coin = Desision(propability=proba)
+
+        return self.tree_.random_pruning(coin)
+
+    def nodes_number(self):
+        """return the number of nodes of the tree
+        """
+        return 1 + self.tree_.nb_childs(0)
+
+    def get_size(self):
+        """return the size of the tree
+        """
+        return  sys.getsizeof(self) + self.tree_.size()
 
 
 # =============================================================================

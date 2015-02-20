@@ -29,6 +29,7 @@ from scipy.sparse import issparse, csc_matrix, csr_matrix
 from sklearn.tree._utils cimport Stack, StackRecord
 from sklearn.tree._utils cimport PriorityHeap, PriorityHeapRecord
 
+from tree_pruning import Desision
 
 
 cdef extern from "numpy/arrayobject.h":
@@ -2707,12 +2708,16 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                                          split.threshold, impurity, n_node_samples,
                                          weighted_n_node_samples)
 
-                if is_leaf:
-                    # Don't store value for internal nodes
-                    splitter.node_value(tree.value +
-                                        node_id * tree.value_stride)
+                # if is_leaf:
+                #     # Don't store value for internal nodes
+                #     splitter.node_value(tree.value +
+                #                         node_id * tree.value_stride)
 
-                else:
+                # Store value for internal nodes
+                splitter.node_value(tree.value +
+                                    node_id * tree.value_stride)
+
+                if not is_leaf:
                     # Push right child on stack
                     rc = stack.push(split.pos, end, depth + 1, node_id, 0,
                                     split.impurity_right, n_constant_features)
@@ -3411,6 +3416,59 @@ cdef class Tree:
         Py_INCREF(self)
         arr.base = <PyObject*> self
         return arr
+
+    cpdef int nb_childs(self, SIZE_t parent):
+        cdef Node* node = &self.nodes[parent]
+        nb = 0
+        if not node.left_child == _TREE_LEAF:
+            nb = nb + 1 + self.nb_childs(node.left_child)
+        if not node.right_child == _TREE_LEAF:
+            nb = nb + 1 + self.nb_childs(node.right_child)
+        return nb
+
+    cpdef int random_pruning(self, object coin):
+         # Check input
+        if not isinstance(coin, Desision):
+            raise ValueError("coin should be in Desision format, got %s"
+                             % type(coin))
+        return self.df_pruning(0, coin)
+
+    cdef int df_pruning(self, SIZE_t root, object coin):
+        """Depth first path"""
+        cdef Node* node = &self.nodes[root]
+        if coin.flip():
+            # if coin.flip(proba=0.5):
+            #   node.left_child = _TREE_LEAF
+            # else:
+            #   node.right_child == _TREE_LEAF
+            node.left_child = _TREE_LEAF
+            node.right_child == _TREE_LEAF
+
+        if not node.left_child == _TREE_LEAF:
+            self.df_pruning(node.left_child, coin)
+        if not node.right_child == _TREE_LEAF:
+            self.df_pruning(node.right_child, coin)
+
+        return 0
+
+    cdef int dfid_pruning(self):
+        """depth-first iterative deepening path"""
+        cdef int depth = 0
+        while self.dfid_pruning_aux(0, depth) > 0:
+            depth += 1
+        return 0
+
+    cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth):
+        """ depth-first iterative deepening path
+            TODO: function not yet implemented
+        """
+        return 0
+
+    cpdef int size(self):
+        return (self.capacity * sizeof(Node)) + (self.capacity * self.value_stride * sizeof(double))
+
+
+
 
 # =============================================================================
 # Utils

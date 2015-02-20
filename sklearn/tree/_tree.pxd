@@ -192,6 +192,18 @@ cdef class Tree:
 
     cpdef compute_feature_importances(self, normalize=*)
 
+    cpdef int random_pruning(self, object coin)
+
+    cdef int dfid_pruning(self)
+    cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth)
+
+    cdef int df_pruning(self, SIZE_t root, object coin)
+
+    cpdef int nb_childs(self, SIZE_t parent)
+
+    cpdef int size(self)
+
+
 
 # =============================================================================
 # Tree builder
