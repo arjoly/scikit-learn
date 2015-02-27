@@ -301,9 +301,9 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
             for tree in self.estimators_)
         return sum(all_importances) / self.n_estimators
 
-    def random_pruning(self, proba=0.01):
+    def random_pruning(self, version=1, proba=0.1):
         for tree in self.estimators_:
-            tree.random_pruning(proba)
+            tree.random_pruning(version, proba)
 
     def get_size(self):
         return sum(tree.get_size() for tree in self.estimators_)

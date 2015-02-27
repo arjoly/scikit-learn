@@ -374,15 +374,18 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         return self.tree_.compute_feature_importances()
 
-    def random_pruning(self, proba=0.1):
+    def random_pruning(self, version=1, proba=0.1):
         """Excute a post pruning method on a tree
         """
         if self.tree_ is None:
             raise Exception("Tree not initialized. Perform a fit first")
 
+        if version != 1 and version != 2:
+            raise Exception("Invalid pruning version [1-2]")
+
         coin = Desision(propability=proba)
 
-        return self.tree_.random_pruning(coin)
+        return self.tree_.random_pruning(version, coin)
 
     def nodes_number(self):
         """return the number of nodes of the tree

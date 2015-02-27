@@ -3250,18 +3250,28 @@ cdef class Tree:
         # Initialize auxiliary data-structure
         cdef Node* node = NULL
         cdef SIZE_t i = 0
+        cdef DTYPE_t feature_value = 0.
 
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
-                # While node not a leaf
-                while node.left_child != _TREE_LEAF:
-                    # ... and node.right_child != _TREE_LEAF:
-                    if X_ptr[X_sample_stride * i +
-                             X_fx_stride * node.feature] <= node.threshold:
+
+                while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
+                    feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+                    if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
                         node = &self.nodes[node.left_child]
-                    else:
+                    elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
                         node = &self.nodes[node.right_child]
+                    else:
+                        break
+
+                # # While node not a leaf
+                # while node.left_child != _TREE_LEAF and node.right_child != _TREE_LEAF:
+                #     if X_ptr[X_sample_stride * i +
+                #              X_fx_stride * node.feature] <= node.threshold:
+                #         node = &self.nodes[node.left_child]
+                #     else:
+                #         node = &self.nodes[node.right_child]
 
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
@@ -3321,21 +3331,44 @@ cdef class Tree:
                     feature_to_sample[X_indices[k]] = i
                     X_sample[X_indices[k]] = X_data[k]
 
-                # While node not a leaf
-                while node.left_child != _TREE_LEAF:
-                    # ... and node.right_child != _TREE_LEAF:
+
+
+
+
+                while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
                     if feature_to_sample[node.feature] == i:
                         feature_value = X_sample[node.feature]
-
                     else:
                         feature_value = 0.
 
-                    if feature_value <= node.threshold:
+                    if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
                         node = &self.nodes[node.left_child]
-                    else:
+                    elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
                         node = &self.nodes[node.right_child]
+                    else:
+                        break
 
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
+
+
+
+
+                # # While node not a leaf
+                # while node.left_child != _TREE_LEAF:
+                #     # ... and node.right_child != _TREE_LEAF:
+                #     if feature_to_sample[node.feature] == i:
+                #         feature_value = X_sample[node.feature]
+
+                #     else:
+                #         feature_value = 0.
+
+                #     if feature_value <= node.threshold:
+                #         node = &self.nodes[node.left_child]
+                #     else:
+                #         node = &self.nodes[node.right_child]
+
+
+
 
             # Free auxiliary arrays
             free(X_sample)
@@ -3426,43 +3459,45 @@ cdef class Tree:
             nb = nb + 1 + self.nb_childs(node.right_child)
         return nb
 
-    cpdef int random_pruning(self, object coin):
+    cpdef int random_pruning(self, int version, object coin):
          # Check input
         if not isinstance(coin, Desision):
             raise ValueError("coin should be in Desision format, got %s"
                              % type(coin))
-        return self.df_pruning(0, coin)
+        return self.df_pruning(0, version, coin)
 
-    cdef int df_pruning(self, SIZE_t root, object coin):
+    cdef int df_pruning(self, SIZE_t root, int version, object coin):
         """Depth first path"""
         cdef Node* node = &self.nodes[root]
         if coin.flip():
-            # if coin.flip(proba=0.5):
-            #   node.left_child = _TREE_LEAF
-            # else:
-            #   node.right_child == _TREE_LEAF
-            node.left_child = _TREE_LEAF
-            node.right_child == _TREE_LEAF
+            if version == 2:
+                if coin.flip(proba=0.5):
+                  node.left_child = _TREE_LEAF
+                else:
+                  node.right_child = _TREE_LEAF
+            else:
+                node.left_child = _TREE_LEAF
+                node.right_child = _TREE_LEAF
 
         if not node.left_child == _TREE_LEAF:
-            self.df_pruning(node.left_child, coin)
+            self.df_pruning(node.left_child, version, coin)
         if not node.right_child == _TREE_LEAF:
-            self.df_pruning(node.right_child, coin)
+            self.df_pruning(node.right_child, version, coin)
 
         return 0
 
-    cdef int dfid_pruning(self):
-        """depth-first iterative deepening path"""
-        cdef int depth = 0
-        while self.dfid_pruning_aux(0, depth) > 0:
-            depth += 1
-        return 0
+    # cdef int dfid_pruning(self):
+    #     """depth-first iterative deepening path"""
+    #     cdef int depth = 0
+    #     while self.dfid_pruning_aux(0, depth) > 0:
+    #         depth += 1
+    #     return 0
 
-    cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth):
-        """ depth-first iterative deepening path
-            TODO: function not yet implemented
-        """
-        return 0
+    # cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth):
+    #     """ depth-first iterative deepening path
+    #         TODO: function not yet implemented
+    #     """
+    #     return 0
 
     cpdef int size(self):
         return (self.capacity * sizeof(Node)) + (self.capacity * self.value_stride * sizeof(double))

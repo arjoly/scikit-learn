@@ -934,7 +934,7 @@ struct __pyx_opt_args_7sklearn_4tree_5_tree_4Tree__resize_c {
  * 
  *     cpdef compute_feature_importances(self, normalize=*)             # <<<<<<<<<<<<<<
  * 
- *     cpdef int random_pruning(self, object coin)
+ *     cpdef int random_pruning(self, int version, object coin)
  */
 struct __pyx_opt_args_7sklearn_4tree_5_tree_4Tree_compute_feature_importances {
   int __pyx_n;
@@ -1185,10 +1185,8 @@ struct __pyx_vtabstruct_7sklearn_4tree_5_tree_Tree {
   PyArrayObject *(*_apply_dense)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, PyObject *);
   PyArrayObject *(*_apply_sparse_csr)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, PyObject *);
   PyObject *(*compute_feature_importances)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, int __pyx_skip_dispatch, struct __pyx_opt_args_7sklearn_4tree_5_tree_4Tree_compute_feature_importances *__pyx_optional_args);
-  int (*random_pruning)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, PyObject *, int __pyx_skip_dispatch);
-  int (*dfid_pruning)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *);
-  int (*dfid_pruning_aux)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, __pyx_t_7sklearn_4tree_5_tree_SIZE_t, int);
-  int (*df_pruning)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, __pyx_t_7sklearn_4tree_5_tree_SIZE_t, PyObject *);
+  int (*random_pruning)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, int, PyObject *, int __pyx_skip_dispatch);
+  int (*df_pruning)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, __pyx_t_7sklearn_4tree_5_tree_SIZE_t, int, PyObject *);
   int (*nb_childs)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, __pyx_t_7sklearn_4tree_5_tree_SIZE_t, int __pyx_skip_dispatch);
   int (*size)(struct __pyx_obj_7sklearn_4tree_5_tree_Tree *, int __pyx_skip_dispatch);
 };
