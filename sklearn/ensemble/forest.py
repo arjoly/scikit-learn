@@ -302,14 +302,37 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         return sum(all_importances) / self.n_estimators
 
     def random_pruning(self, version=1, proba=0.1):
+        """Excute a post pruning method on each tree of the forest
+        """
         for tree in self.estimators_:
             tree.random_pruning(version, proba)
 
     def get_size(self):
+        """return the size of the forest (in Bytes)
+        """
         return sum(tree.get_size() for tree in self.estimators_)
 
-    def nodes_number(self):
-        return sum(tree.nodes_number() for tree in self.estimators_)
+    def get_nodes_number(self):
+        """return the number of nodes of the forest
+        """
+        return sum(tree.get_nodes_number() for tree in self.estimators_)
+
+    def get_leafs_number(self):
+        """return the number of leaf of the forest
+        """
+        return sum(tree.get_leafs_number() for tree in self.estimators_)
+
+    def get_mean_depth(self):
+        """return the average depth of the forest. Computed by calculating
+           the average of each tree depth average
+        """
+        return float(sum(tree.get_mean_depth() for tree in self.estimators_))/self.n_estimators
+
+    def get_max_depth(self):
+        """Return the absolute max depth from all trees
+        """
+        return max(tree.get_max_depth() for tree in self.estimators_)
+
 
 
 class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,

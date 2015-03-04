@@ -192,16 +192,19 @@ cdef class Tree:
 
     cpdef compute_feature_importances(self, normalize=*)
 
+
+    ####### Pruning ###########################################################
     cpdef int random_pruning(self, int version, object coin)
+    cdef int df_pruning_v1(self, SIZE_t root, object coin)
+    cdef int df_pruning_v2(self, SIZE_t root, object coin)
+    cdef int df_pruning_v3(self, SIZE_t root, object coin)
 
-    # cdef int dfid_pruning(self)
-    # cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth)
-
-    cdef int df_pruning(self, SIZE_t root, int version, object coin)
-
-    cpdef int nb_childs(self, SIZE_t parent)
-
-    cpdef int size(self)
+    ####### Getters ###########################################################
+    cpdef int get_nb_childs(self, SIZE_t root)
+    cpdef int get_nb_leaf(self, SIZE_t root)
+    cpdef int get_sum_leaf_depth(self, SIZE_t root, int depth)
+    cpdef int get_max_depth(self, SIZE_t root, int depth)
+    cpdef int get_size(self)
 
 
 

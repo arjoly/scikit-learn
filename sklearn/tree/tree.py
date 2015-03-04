@@ -380,22 +380,38 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         if self.tree_ is None:
             raise Exception("Tree not initialized. Perform a fit first")
 
-        if version != 1 and version != 2:
-            raise Exception("Invalid pruning version [1-2]")
+        if version < 1 or version > 3:
+            raise Exception("Invalid pruning version [1-3]")
 
         coin = Desision(propability=proba)
 
         return self.tree_.random_pruning(version, coin)
 
-    def nodes_number(self):
+    def get_size(self):
+        """return the size of the tree (in Bytes)
+        """
+        return sys.getsizeof(self) + self.tree_.get_size()
+
+    def get_nodes_number(self):
         """return the number of nodes of the tree
         """
-        return 1 + self.tree_.nb_childs(0)
+        return 1 + self.tree_.get_nb_childs(0)
 
-    def get_size(self):
-        """return the size of the tree
+    def get_leafs_number(self):
+        """return the number of leaf of the tree
         """
-        return  sys.getsizeof(self) + self.tree_.size()
+        return self.tree_.get_nb_leaf(0)
+
+    def get_mean_depth(self):
+        """return the average depth of the three
+        """
+        return float(
+            self.tree_.get_sum_leaf_depth(0, 0)) / self.tree_.get_nb_leaf(0)
+
+    def get_max_depth(self):
+        """return the max depth of the tree
+        """
+        return self.tree_.get_max_depth(0, 0)
 
 
 # =============================================================================

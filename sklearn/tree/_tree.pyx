@@ -3256,6 +3256,8 @@ cdef class Tree:
             for i in range(n_samples):
                 node = self.nodes
 
+                # We no longer have full binary tree.
+                # A node can have 0, 1 or 2 childs
                 while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
                     feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
                     if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
@@ -3331,10 +3333,8 @@ cdef class Tree:
                     feature_to_sample[X_indices[k]] = i
                     X_sample[X_indices[k]] = X_data[k]
 
-
-
-
-
+                # We no longer have full binary tree.
+                # A node can have 0, 1 or 2 childs
                 while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
                     if feature_to_sample[node.feature] == i:
                         feature_value = X_sample[node.feature]
@@ -3347,11 +3347,6 @@ cdef class Tree:
                         node = &self.nodes[node.right_child]
                     else:
                         break
-
-                out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
-
-
-
 
                 # # While node not a leaf
                 # while node.left_child != _TREE_LEAF:
@@ -3367,8 +3362,7 @@ cdef class Tree:
                 #     else:
                 #         node = &self.nodes[node.right_child]
 
-
-
+                out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
             # Free auxiliary arrays
             free(X_sample)
@@ -3450,57 +3444,176 @@ cdef class Tree:
         arr.base = <PyObject*> self
         return arr
 
-    cpdef int nb_childs(self, SIZE_t parent):
-        cdef Node* node = &self.nodes[parent]
-        nb = 0
-        if not node.left_child == _TREE_LEAF:
-            nb = nb + 1 + self.nb_childs(node.left_child)
-        if not node.right_child == _TREE_LEAF:
-            nb = nb + 1 + self.nb_childs(node.right_child)
-        return nb
-
+    ###########################################################################
+    ####### Pruning ###########################################################
+    ###########################################################################
     cpdef int random_pruning(self, int version, object coin):
+        """ Perform a random pruning on the tree.
+        """
          # Check input
         if not isinstance(coin, Desision):
             raise ValueError("coin should be in Desision format, got %s"
                              % type(coin))
-        return self.df_pruning(0, version, coin)
+        if version < 1 or version > 3:
+            raise ValueError("Version should be in [1 - 3]")
 
-    cdef int df_pruning(self, SIZE_t root, int version, object coin):
-        """Depth first path"""
+        if version == 1:
+            return self.df_pruning_v1(0, coin)
+        elif version == 2:
+            return self.df_pruning_v2(0, coin)
+        elif version == 3:
+            return self.df_pruning_v3(0, coin)
+
+
+    cdef int df_pruning_v1(self, SIZE_t root, object coin):
+        """Depth first path. Version 1"""
         cdef Node* node = &self.nodes[root]
-        if coin.flip():
-            if version == 2:
-                if coin.flip(proba=0.5):
-                  node.left_child = _TREE_LEAF
-                else:
-                  node.right_child = _TREE_LEAF
-            else:
+        if node.left_child != _TREE_LEAF: # and node.right_child != _TREE_LEAF:
+            if coin.flip():
                 node.left_child = _TREE_LEAF
                 node.right_child = _TREE_LEAF
+            else:
+                self.df_pruning_v1(node.left_child, coin)
+                self.df_pruning_v1(node.right_child, coin)
 
-        if not node.left_child == _TREE_LEAF:
-            self.df_pruning(node.left_child, version, coin)
-        if not node.right_child == _TREE_LEAF:
-            self.df_pruning(node.right_child, version, coin)
-
+        # cdef Node* node = &self.nodes[root]
+        # if coin.flip():
+        #     node.left_child = _TREE_LEAF
+        #     node.right_child = _TREE_LEAF
+        # else:
+        #     if not node.left_child == _TREE_LEAF:
+        #         self.df_pruning_v1(node.left_child, coin)
+        #     if not node.right_child == _TREE_LEAF:
+        #         self.df_pruning_v1(node.right_child, coin)
         return 0
 
-    # cdef int dfid_pruning(self):
-    #     """depth-first iterative deepening path"""
-    #     cdef int depth = 0
-    #     while self.dfid_pruning_aux(0, depth) > 0:
-    #         depth += 1
-    #     return 0
 
-    # cdef int dfid_pruning_aux(self, SIZE_t root, int max_depth):
-    #     """ depth-first iterative deepening path
-    #         TODO: function not yet implemented
-    #     """
-    #     return 0
+    cdef int df_pruning_v2(self, SIZE_t root, object coin):
+        """Depth first path. Version 2"""
+        cdef Node* node = &self.nodes[root]
+        if coin.flip():
+            if coin.flip(proba=0.5):
+                node.left_child = _TREE_LEAF
+            else:
+                node.right_child = _TREE_LEAF
 
-    cpdef int size(self):
+        if node.left_child != _TREE_LEAF:
+            self.df_pruning_v2(node.left_child, coin)
+        if node.right_child != _TREE_LEAF:
+            self.df_pruning_v2(node.right_child, coin)
+        return 0
+
+
+    cdef int df_pruning_v3(self, SIZE_t root, object coin):
+        """Depth first path. Version 3"""
+        cdef Node* node = &self.nodes[root]
+        if node.left_child != _TREE_LEAF: # and node.right_child != _TREE_LEAF:
+            if coin.flip():
+                if coin.flip(proba=0.5):
+                    self.df_pruning_v3(node.right_child, coin)
+                    node = &self.nodes[node.left_child]
+                    node.left_child = _TREE_LEAF
+                    node.right_child = _TREE_LEAF
+                else:
+                    self.df_pruning_v3(node.left_child, coin)
+                    node = &self.nodes[node.right_child]
+                    node.left_child = _TREE_LEAF
+                    node.right_child = _TREE_LEAF
+            else:
+                self.df_pruning_v3(node.left_child, coin)
+                self.df_pruning_v3(node.right_child, coin)
+
+        # cdef Node* node = &self.nodes[root]
+        # if coin.flip():
+        #     if coin.flip(proba=0.5):
+        #         if not node.right_child == _TREE_LEAF:
+        #             self.df_pruning_v3(node.right_child, coin)
+        #         if not node.left_child == _TREE_LEAF:
+        #             node = &self.nodes[node.left_child]
+        #             node.left_child = _TREE_LEAF
+        #             node.right_child = _TREE_LEAF
+        #     else:
+        #         if not node.left_child == _TREE_LEAF:
+        #             self.df_pruning_v3(node.left_child, coin)
+        #         if not node.right_child == _TREE_LEAF:
+        #             node = &self.nodes[node.right_child]
+        #             node.left_child = _TREE_LEAF
+        #             node.right_child = _TREE_LEAF
+        # else:
+        #     if not node.left_child == _TREE_LEAF:
+        #         self.df_pruning_v3(node.left_child, coin)
+        #     if not node.right_child == _TREE_LEAF:
+        #         self.df_pruning_v3(node.right_child, coin)
+        return 0
+
+
+    ###########################################################################
+    ####### Getters ###########################################################
+    ###########################################################################
+    cpdef int get_size(self):
         return (self.capacity * sizeof(Node)) + (self.capacity * self.value_stride * sizeof(double))
+
+
+    cpdef int get_nb_childs(self, SIZE_t root):
+        cdef Node* node = &self.nodes[root]
+        nb = 0
+        if not node.left_child == _TREE_LEAF:
+            nb = nb + 1 + self.get_nb_childs(node.left_child)
+        if not node.right_child == _TREE_LEAF:
+            nb = nb + 1 + self.get_nb_childs(node.right_child)
+        return nb
+
+
+    cpdef int get_nb_leaf(self, SIZE_t root):
+        cdef Node* node = &self.nodes[root]
+        cdef int nb = 0
+        if node.left_child == _TREE_LEAF or node.right_child == _TREE_LEAF:
+            nb = 1
+        if not node.left_child == _TREE_LEAF:
+            nb += self.get_nb_leaf(node.left_child)
+        if not node.right_child == _TREE_LEAF:
+            nb += self.get_nb_leaf(node.right_child)
+        return nb
+
+
+    cpdef int get_sum_leaf_depth(self, SIZE_t root, int depth):
+        cdef Node* node = &self.nodes[root]
+        cdef int nb = 0
+        if node.left_child == _TREE_LEAF or node.right_child == _TREE_LEAF:
+            nb = depth
+        if not node.left_child == _TREE_LEAF:
+            nb += self.get_sum_leaf_depth(node.left_child, depth+1)
+        if not node.right_child == _TREE_LEAF:
+            nb += self.get_sum_leaf_depth(node.right_child, depth+1)
+        return nb
+
+
+    cpdef int get_max_depth(self, SIZE_t root, int depth):
+        cdef Node* node = &self.nodes[root]
+
+        cdef int dleft = depth
+        cdef int dright = depth
+
+        if not node.left_child == _TREE_LEAF:
+            dleft = self.get_max_depth(node.left_child, depth+1)
+
+        if not node.right_child == _TREE_LEAF:
+            dright = self.get_max_depth(node.right_child, depth+1)
+
+        if dleft < dright:
+            return dright
+        return dleft
+
+    # cpdef int sum_nodes_depth(self, SIZE_t root, int depth):
+    #     cdef Node* node = &self.nodes[root]
+    #     cdef int nb = depth
+    #     if not node.left_child == _TREE_LEAF:
+    #         nb += self.sum_nodes_depth(node.left_child, depth+1)
+    #     if not node.right_child == _TREE_LEAF:
+    #         nb += self.sum_nodes_depth(node.right_child, depth+1)
+    #     return nb
+
+
 
 
 

@@ -1,5 +1,6 @@
 from sklearn.utils import check_random_state
 
+
 class Desision:
 
     def __init__(self, random_state=None, propability=0.1):
