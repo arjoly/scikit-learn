@@ -199,12 +199,17 @@ cdef class Tree:
     cdef int df_pruning_v2(self, SIZE_t root, object coin)
     cdef int df_pruning_v3(self, SIZE_t root, object coin)
 
+    cpdef int usage_pruning(self, object X, object lil_nodes)
+    cpdef int usage_dense(self, object X, object lil_nodes)
+    cpdef int usage_sparse_csr(self, object X, object lil_nodes)
+
     ####### Getters ###########################################################
     cpdef int get_nb_childs(self, SIZE_t root)
     cpdef int get_nb_leaf(self, SIZE_t root)
     cpdef int get_sum_leaf_depth(self, SIZE_t root, int depth)
     cpdef int get_max_depth(self, SIZE_t root, int depth)
     cpdef int get_size(self)
+    cpdef int get_node_count(self)
 
 
 

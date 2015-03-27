@@ -24,7 +24,7 @@ import numpy as np
 cimport numpy as np
 np.import_array()
 
-from scipy.sparse import issparse, csc_matrix, csr_matrix
+from scipy.sparse import issparse, csc_matrix, csr_matrix, lil_matrix
 
 from sklearn.tree._utils cimport Stack, StackRecord
 from sklearn.tree._utils cimport PriorityHeap, PriorityHeapRecord
@@ -3267,14 +3267,6 @@ cdef class Tree:
                     else:
                         break
 
-                # # While node not a leaf
-                # while node.left_child != _TREE_LEAF and node.right_child != _TREE_LEAF:
-                #     if X_ptr[X_sample_stride * i +
-                #              X_fx_stride * node.feature] <= node.threshold:
-                #         node = &self.nodes[node.left_child]
-                #     else:
-                #         node = &self.nodes[node.right_child]
-
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
         return out
@@ -3347,20 +3339,6 @@ cdef class Tree:
                         node = &self.nodes[node.right_child]
                     else:
                         break
-
-                # # While node not a leaf
-                # while node.left_child != _TREE_LEAF:
-                #     # ... and node.right_child != _TREE_LEAF:
-                #     if feature_to_sample[node.feature] == i:
-                #         feature_value = X_sample[node.feature]
-
-                #     else:
-                #         feature_value = 0.
-
-                #     if feature_value <= node.threshold:
-                #         node = &self.nodes[node.left_child]
-                #     else:
-                #         node = &self.nodes[node.right_child]
 
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
@@ -3444,8 +3422,140 @@ cdef class Tree:
         arr.base = <PyObject*> self
         return arr
 
+
     ###########################################################################
-    ####### Pruning ###########################################################
+    ####### Usage Pruning #####################################################
+    ###########################################################################
+    cpdef int usage_pruning(self, object X, object lil_nodes):
+        # check input
+        if not isinstance(lil_nodes, lil_matrix):
+            raise ValueError("lil_nodes should be in lil_matrix format, got %s"
+                             % type(X))
+
+        if issparse(X):
+            return self.usage_sparse_csr(X, lil_nodes)
+        else:
+            return self.usage_dense(X, lil_nodes)
+
+    cpdef int usage_dense(self, object X, object lil_nodes):
+        # Check input
+        if not isinstance(X, np.ndarray):
+            raise ValueError("X should be in np.ndarray format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        # Extract input
+        cdef np.ndarray X_ndarray = X
+        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
+        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
+        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        cdef SIZE_t n_samples = X.shape[0]
+
+        # Initialize auxiliary data-structure
+        cdef Node* node = NULL
+        cdef SIZE_t i = 0
+        cdef DTYPE_t feature_value = 0.
+        cdef SIZE_t nodeid = 0
+
+        for i in range(n_samples):
+            node = self.nodes
+            nodeid = 0
+
+            # While node not a leaf
+            while node.left_child != _TREE_LEAF:
+                # ... and node.right_child != _TREE_LEAF:
+
+                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
+
+                if X_ptr[X_sample_stride * i +
+                         X_fx_stride * node.feature] <= node.threshold:
+                    nodeid = node.left_child
+                    node = &self.nodes[node.left_child]
+                else:
+                    nodeid = node.right_child
+                    node = &self.nodes[node.right_child]
+
+        return 1
+
+
+    cpdef int usage_sparse_csr(self, object X, object lil_nodes):
+        # Check input
+        if not isinstance(X, csr_matrix):
+            raise ValueError("X should be in csr_matrix format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        # Extract input
+        cdef np.ndarray[ndim=1, dtype=DTYPE_t] X_data_ndarray = X.data
+        cdef np.ndarray[ndim=1, dtype=INT32_t] X_indices_ndarray  = X.indices
+        cdef np.ndarray[ndim=1, dtype=INT32_t] X_indptr_ndarray  = X.indptr
+
+        cdef DTYPE_t* X_data = <DTYPE_t*>X_data_ndarray.data
+        cdef INT32_t* X_indices = <INT32_t*>X_indices_ndarray.data
+        cdef INT32_t* X_indptr = <INT32_t*>X_indptr_ndarray.data
+
+        cdef SIZE_t n_samples = X.shape[0]
+        cdef SIZE_t n_features = X.shape[1]
+
+        # Initialize auxiliary data-structure
+        cdef DTYPE_t feature_value = 0.
+        cdef Node* node = NULL
+        cdef DTYPE_t* X_sample = NULL
+        cdef SIZE_t i = 0
+        cdef INT32_t k = 0
+        cdef SIZE_t nodeid = 0
+
+        # feature_to_sample as a data structure records the last seen sample
+        # for each feature; functionally, it is an efficient way to identify
+        # which features are nonzero in the present sample.
+        cdef SIZE_t* feature_to_sample = NULL
+
+        safe_realloc(&X_sample, n_features * sizeof(DTYPE_t))
+        safe_realloc(&feature_to_sample, n_features * sizeof(SIZE_t))
+
+        memset(feature_to_sample, -1, n_features * sizeof(SIZE_t))
+
+        for i in range(n_samples):
+            node = self.nodes
+            nodeid = 0
+
+            for k in range(X_indptr[i], X_indptr[i + 1]):
+                feature_to_sample[X_indices[k]] = i
+                X_sample[X_indices[k]] = X_data[k]
+
+            # While node not a leaf
+            while node.left_child != _TREE_LEAF:
+                # ... and node.right_child != _TREE_LEAF:
+
+                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
+
+                if feature_to_sample[node.feature] == i:
+                    feature_value = X_sample[node.feature]
+
+                else:
+                    feature_value = 0.
+
+                if feature_value <= node.threshold:
+                    nodeid = node.left_child
+                    node = &self.nodes[node.left_child]
+                else:
+                    nodeid = node.right_child
+                    node = &self.nodes[node.right_child]
+
+        # Free auxiliary arrays
+        free(X_sample)
+        free(feature_to_sample)
+
+        return 1
+
+
+
+    ###########################################################################
+    ####### Random pruning ####################################################
     ###########################################################################
     cpdef int random_pruning(self, int version, object coin):
         """ Perform a random pruning on the tree.
@@ -3550,6 +3660,10 @@ cdef class Tree:
     ###########################################################################
     ####### Getters ###########################################################
     ###########################################################################
+    cpdef int get_node_count(self):
+        return self.node_count
+
+
     cpdef int get_size(self):
         return (self.capacity * sizeof(Node)) + (self.capacity * self.value_stride * sizeof(double))
 

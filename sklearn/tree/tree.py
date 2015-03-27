@@ -22,6 +22,8 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 from scipy.sparse import issparse
+from scipy.sparse import csr_matrix
+from scipy.sparse import lil_matrix
 
 from ..base import BaseEstimator, ClassifierMixin, RegressorMixin
 from ..externals import six
@@ -386,6 +388,31 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         coin = Desision(propability=proba)
 
         return self.tree_.random_pruning(version, coin)
+
+    def usage_pruning(self, X, alpha = 2):
+        """Excute a post pruning method on a tree
+        """
+        X = check_array(X, dtype=DTYPE, accept_sparse="csr")
+        if issparse(X) and (X.indices.dtype != np.intc or
+                            X.indptr.dtype != np.intc):
+            raise ValueError("No support for np.int64 index based "
+                             "sparse matrices")
+
+        # Determine size of my sparse matrix
+        n_samples, n_features = X.shape
+        node_count = self.tree_.get_node_count()
+
+        lil_nodes = lil_matrix((n_samples, node_count), dtype=np.int8)
+        self.tree_.usage_pruning(X, lil_nodes)
+        csr_nodes = lil_nodes.tocsr()
+
+        print csr_nodes.toarray()
+
+    def noise_in_treshold_pruning(self, mean = 0, std = 0.5):
+        """Excute a post pruning method on a tree
+        """
+        pass
+
 
     def get_size(self):
         """return the size of the tree (in Bytes)

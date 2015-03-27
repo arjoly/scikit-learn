@@ -307,6 +307,18 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         for tree in self.estimators_:
             tree.random_pruning(version, proba)
 
+    def usage_pruning(self, X, alpha=2):
+        """Excute a post pruning method on each tree of the forest
+        """
+        for tree in self.estimators_:
+            tree.usage_pruning(alpha=alpha)
+
+    def noise_in_treshold_pruning(self, mean=0, std=0.5):
+        """Excute a post pruning method on each tree of the forest
+        """
+        for tree in self.estimators_:
+            tree.noise_in_treshold_pruning(mean=mean, std=std)
+
     def get_size(self):
         """return the size of the forest (in Bytes)
         """
