@@ -2,6 +2,7 @@
 # cython: boundscheck=False
 # cython: wraparound=False
 
+
 # Authors: Gilles Louppe <g.louppe@gmail.com>
 #          Peter Prettenhofer <peter.prettenhofer@gmail.com>
 #          Brian Holt <bdholt1@gmail.com>
@@ -3211,8 +3212,16 @@ cdef class Tree:
 
     cpdef np.ndarray predict(self, object X):
         """Predict target for X."""
-        out = self._get_value_ndarray().take(self.apply(X), axis=0,
-                                             mode='clip')
+        out = self._get_value_ndarray().take(self.apply(X),
+                                             axis=0, mode='clip')
+        if self.n_outputs == 1:
+            out = out.reshape(X.shape[0], self.max_n_classes)
+        return out
+
+    cpdef np.ndarray predict_noise(self, object X, object x_std, float mean, float std):
+        """Predict target for X."""
+        out = self._get_value_ndarray().take(self.apply_noise(X, x_std, mean, std),
+                                             axis=0, mode='clip')
         if self.n_outputs == 1:
             out = out.reshape(X.shape[0], self.max_n_classes)
         return out
@@ -3220,12 +3229,20 @@ cdef class Tree:
     cpdef np.ndarray apply(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
         if issparse(X):
-            return self._apply_sparse_csr(X)
+            return self._apply_sparse_csr(X, None, 0, 0)
         else:
-            return self._apply_dense(X)
+            return self._apply_dense(X, None, 0, 0)
 
 
-    cdef inline np.ndarray _apply_dense(self, object X):
+    cpdef np.ndarray apply_noise(self, object X, object x_std, float mean, float std):
+        """Finds the terminal region (=leaf node) for each sample in X."""
+        if issparse(X):
+            return self._apply_sparse_csr(X, x_std, mean, std)
+        else:
+            return self._apply_dense(X, x_std, mean, std)
+
+
+    cdef inline np.ndarray _apply_dense(self, object X, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in X."""
 
         # Check input
@@ -3235,6 +3252,10 @@ cdef class Tree:
 
         if X.dtype != DTYPE:
             raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        if x_std is not None and not isinstance(x_std, np.ndarray):
+            raise ValueError("x_std should be None or in np.ndarray format,"
+                             + " got %s" % type(x_std))
 
         # Extract input
         cdef np.ndarray X_ndarray = X
@@ -3252,26 +3273,56 @@ cdef class Tree:
         cdef SIZE_t i = 0
         cdef DTYPE_t feature_value = 0.
 
+        # Noise in threshold
+        cdef object noise = Desision ()
+        cdef DOUBLE_t feature_std = 0
+        cdef DOUBLE_t threshold = 0
+        cdef np.ndarray XSTD_ndarray
+        cdef DTYPE_t* XSTD_ptr
+        cdef SIZE_t XSTD_fx_stride = 0
+
+        if x_std is not None:
+            XSTD_ndarray = x_std
+            XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
+            XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
 
-                # We no longer have full binary tree.
-                # A node can have 0, 1 or 2 childs
-                while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
-                    feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
-                    if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
+                # While node not a leaf
+                while node.left_child != _TREE_LEAF:
+                    # ... and node.right_child != _TREE_LEAF:
+
+                    # Compute new threshold with noise
+                    threshold = node.threshold
+                    if x_std is not None:
+                        feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
+                        threshold = threshold # + noise.noise(mu, feature_std)
+
+                    if X_ptr[X_sample_stride * i +
+                             X_fx_stride * node.feature] <= threshold:
                         node = &self.nodes[node.left_child]
-                    elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
-                        node = &self.nodes[node.right_child]
                     else:
-                        break
+                        node = &self.nodes[node.right_child]
+
+                # # We no longer have full binary tree.
+                # # A node can have 0, 1 or 2 childs
+                # # Not dealing with additional noise in thresholds
+                # while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
+                #     feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+                #     if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
+                #         node = &self.nodes[node.left_child]
+                #     elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
+                #         node = &self.nodes[node.right_child]
+                #     else:
+                #         break
 
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
         return out
 
-    cdef inline np.ndarray _apply_sparse_csr(self, object X):
+    cdef inline np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in sparse X.
 
         """
@@ -3282,6 +3333,10 @@ cdef class Tree:
 
         if X.dtype != DTYPE:
             raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        if x_std is not None and not isinstance(x_std, np.ndarray):
+            raise ValueError("x_std should be None or in np.ndarray format,"
+                             + " got %s" % type(x_std))
 
         # Extract input
         cdef np.ndarray[ndim=1, dtype=DTYPE_t] X_data_ndarray = X.data
@@ -3307,6 +3362,19 @@ cdef class Tree:
         cdef SIZE_t i = 0
         cdef INT32_t k = 0
 
+        # Noise in threshold
+        cdef object noise = Desision ()
+        cdef DOUBLE_t feature_std = 0
+        cdef DOUBLE_t threshold = 0
+        cdef np.ndarray XSTD_ndarray
+        cdef DTYPE_t* XSTD_ptr
+        cdef SIZE_t XSTD_fx_stride = 0
+
+        if x_std is not None:
+            XSTD_ndarray = x_std
+            XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
+            XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+
         # feature_to_sample as a data structure records the last seen sample
         # for each feature; functionally, it is an efficient way to identify
         # which features are nonzero in the present sample.
@@ -3325,20 +3393,43 @@ cdef class Tree:
                     feature_to_sample[X_indices[k]] = i
                     X_sample[X_indices[k]] = X_data[k]
 
-                # We no longer have full binary tree.
-                # A node can have 0, 1 or 2 childs
-                while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
+                # While node not a leaf
+                while node.left_child != _TREE_LEAF:
+                    # ... and node.right_child != _TREE_LEAF:
                     if feature_to_sample[node.feature] == i:
                         feature_value = X_sample[node.feature]
+
                     else:
                         feature_value = 0.
 
-                    if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
+                    # Compute new threshold with noise
+                    threshold = node.threshold
+                    if x_std is not None:
+                        feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
+                        threshold = threshold # + noise.noise(mu, feature_std)
+
+
+
+                    if feature_value <= threshold:
                         node = &self.nodes[node.left_child]
-                    elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
-                        node = &self.nodes[node.right_child]
                     else:
-                        break
+                        node = &self.nodes[node.right_child]
+
+                # # We no longer have full binary tree.
+                # # A node can have 0, 1 or 2 childs
+                # # Not dealing with additional noise in thresholds
+                # while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
+                #     if feature_to_sample[node.feature] == i:
+                #         feature_value = X_sample[node.feature]
+                #     else:
+                #         feature_value = 0.
+
+                #     if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
+                #         node = &self.nodes[node.left_child]
+                #     elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
+                #         node = &self.nodes[node.right_child]
+                #     else:
+                #         break
 
                 out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
 
@@ -3426,18 +3517,42 @@ cdef class Tree:
     ###########################################################################
     ####### Usage Pruning #####################################################
     ###########################################################################
-    cpdef int usage_pruning(self, object X, object lil_nodes):
+    cpdef int usage_pruning(self, SIZE_t root, object coef):
+        cdef Node* node = &self.nodes[root]
+        if node.left_child != _TREE_LEAF: # and node.right_child != _TREE_LEAF:
+            if self.is_deletable(root, coef):
+                node.left_child = _TREE_LEAF
+                node.right_child = _TREE_LEAF
+            else:
+                self.usage_pruning(node.left_child, coef)
+                self.usage_pruning(node.right_child, coef)
+
+    cdef bint is_deletable(self, SIZE_t root, object coef):
+        cdef bint res1 = 1
+        cdef bint res2 = 1
+
+        if coef[root] != 0:
+            return 0
+
+        cdef Node* node = &self.nodes[root]
+        if node.left_child != _TREE_LEAF: # and node.right_child != _TREE_LEAF:
+            res1 = self.is_deletable(node.left_child, coef)
+            res2 = self.is_deletable(node.right_child, coef)
+
+        return (res1 and res2)
+
+    cpdef int usage_init(self, object X, object lil_nodes):
         # check input
         if not isinstance(lil_nodes, lil_matrix):
             raise ValueError("lil_nodes should be in lil_matrix format, got %s"
                              % type(X))
 
         if issparse(X):
-            return self.usage_sparse_csr(X, lil_nodes)
+            return self.usage_init_sparse_csr(X, lil_nodes)
         else:
-            return self.usage_dense(X, lil_nodes)
+            return self.usage_init_dense(X, lil_nodes)
 
-    cpdef int usage_dense(self, object X, object lil_nodes):
+    cdef int usage_init_dense(self, object X, object lil_nodes):
         # Check input
         if not isinstance(X, np.ndarray):
             raise ValueError("X should be in np.ndarray format, got %s"
@@ -3480,7 +3595,7 @@ cdef class Tree:
         return 1
 
 
-    cpdef int usage_sparse_csr(self, object X, object lil_nodes):
+    cdef int usage_init_sparse_csr(self, object X, object lil_nodes):
         # Check input
         if not isinstance(X, csr_matrix):
             raise ValueError("X should be in csr_matrix format, got %s"
@@ -3595,7 +3710,7 @@ cdef class Tree:
         #         self.df_pruning_v1(node.left_child, coin)
         #     if not node.right_child == _TREE_LEAF:
         #         self.df_pruning_v1(node.right_child, coin)
-        return 0
+        return 1
 
 
     cdef int df_pruning_v2(self, SIZE_t root, object coin):
@@ -3611,7 +3726,7 @@ cdef class Tree:
             self.df_pruning_v2(node.left_child, coin)
         if node.right_child != _TREE_LEAF:
             self.df_pruning_v2(node.right_child, coin)
-        return 0
+        return 1
 
 
     cdef int df_pruning_v3(self, SIZE_t root, object coin):
@@ -3654,7 +3769,7 @@ cdef class Tree:
         #         self.df_pruning_v3(node.left_child, coin)
         #     if not node.right_child == _TREE_LEAF:
         #         self.df_pruning_v3(node.right_child, coin)
-        return 0
+        return 1
 
 
     ###########################################################################

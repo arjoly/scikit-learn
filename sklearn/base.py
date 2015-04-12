@@ -267,7 +267,7 @@ class BaseEstimator(object):
 class ClassifierMixin(object):
     """Mixin class for all classifiers in scikit-learn."""
 
-    def score(self, X, y, sample_weight=None):
+    def score(self, X, y, sample_weight=None, x_std=None):
         """Returns the mean accuracy on the given test data and labels.
 
         In multi-label classification, this is the subset accuracy
@@ -292,14 +292,18 @@ class ClassifierMixin(object):
 
         """
         from .metrics import accuracy_score
-        return accuracy_score(y, self.predict(X), sample_weight=sample_weight)
+
+        if x_std is None:
+            return accuracy_score(y, self.predict(X), sample_weight=sample_weight)
+        else:
+            return accuracy_score(y, self.predict(X, x_std=x_std), sample_weight=sample_weight)
 
 
 ###############################################################################
 class RegressorMixin(object):
     """Mixin class for all regression estimators in scikit-learn."""
 
-    def score(self, X, y, sample_weight=None):
+    def score(self, X, y, sample_weight=None, x_std=None):
         """Returns the coefficient of determination R^2 of the prediction.
 
         The coefficient R^2 is defined as (1 - u/v), where u is the regression
@@ -325,7 +329,10 @@ class RegressorMixin(object):
         """
 
         from .metrics import r2_score
-        return r2_score(y, self.predict(X), sample_weight=sample_weight)
+        if x_std is None:
+            return r2_score(y, self.predict(X), sample_weight=sample_weight)
+        else:
+            return r2_score(y, self.predict(X, x_std=x_std), sample_weight=sample_weight)
 
 
 ###############################################################################

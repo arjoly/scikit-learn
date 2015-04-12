@@ -4,6 +4,7 @@
 
 PYTHON ?= python
 CYTHON ?= cython
+CPPYTHON ?= cython --cplus
 NOSETESTS ?= nosetests
 CTAGS ?= ctags
 
@@ -43,6 +44,8 @@ trailing-spaces:
 
 cython:
 	find sklearn -name "*.pyx" -exec $(CYTHON) {} \;
+	# find sklearn -name "_noise.c" -exec rm {} \;
+	# find sklearn -name "_noise.pyx" -exec $(CPPYTHON) {} \;
 
 ctags:
 	# make tags for symbol based navigation in emacs and vim

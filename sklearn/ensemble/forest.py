@@ -62,6 +62,8 @@ from ..utils import check_random_state, check_array
 from ..utils.validation import DataConversionWarning
 from .base import BaseEnsemble, _partition_estimators
 
+from ..tree.tree_pruning import TreePointer
+
 __all__ = ["RandomForestClassifier",
            "RandomForestRegressor",
            "ExtraTreesClassifier",
@@ -134,6 +136,11 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         self.random_state = random_state
         self.verbose = verbose
         self.warm_start = warm_start
+
+        # Pointers to existing trees in the forest
+        # TODO: Generalize the principle and translate this attribute in
+        #       BaseEnsemble
+        self.supplement_estimators_ = []
 
     def apply(self, X):
         """Apply trees in the forest to X, return leaf indices.
@@ -307,17 +314,19 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         for tree in self.estimators_:
             tree.random_pruning(version, proba)
 
-    def usage_pruning(self, X, alpha=2):
+    def usage_pruning(self, X, y, alpha=1.0):
         """Excute a post pruning method on each tree of the forest
         """
         for tree in self.estimators_:
-            tree.usage_pruning(alpha=alpha)
+            tree.usage_pruning(X, y, alpha)
 
-    def noise_in_treshold_pruning(self, mean=0, std=0.5):
-        """Excute a post pruning method on each tree of the forest
+    def add_tree_pointers(self, to_duplicate, mean=0.0, std=0.0):
+        """ Add new tree pointers
         """
-        for tree in self.estimators_:
-            tree.noise_in_treshold_pruning(mean=mean, std=std)
+        for d in to_duplicate:
+            if d >= 0 and d < self.n_estimators:
+                self.supplement_estimators_.append(
+                    TreePointer(self.estimators_[d], mean, std))
 
     def get_size(self):
         """return the size of the forest (in Bytes)
@@ -435,7 +444,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
 
         return y
 
-    def predict(self, X):
+    def predict(self, X, x_std=None):
         """Predict class for X.
 
         The predicted class of an input sample is computed as the majority
@@ -456,7 +465,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
         # ensure_2d=False because there are actually unit test checking we fail
         # for 1d.
         X = check_array(X, ensure_2d=False, accept_sparse="csr")
-        proba = self.predict_proba(X)
+        proba = self.predict_proba(X, x_std)
 
         if self.n_outputs_ == 1:
             return self.classes_.take(np.argmax(proba, axis=1), axis=0)
@@ -472,7 +481,8 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
 
             return predictions
 
-    def predict_proba(self, X):
+
+    def predict_proba(self, X, x_std=None):
         """Predict class probabilities for X.
 
         The predicted class probabilities of an input sample is computed as
@@ -495,15 +505,20 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
         # Check data
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
 
+        # estimators is the concatenation of real trees + tree pointers
+        estimators = np.concatenate(
+            (self.estimators_, self.supplement_estimators_), axis=0)
+        n_estimators = estimators.shape[0]
+
         # Assign chunk of trees to jobs
-        n_jobs, n_trees, starts = _partition_estimators(self.n_estimators,
+        n_jobs, n_trees, starts = _partition_estimators(n_estimators,
                                                         self.n_jobs)
 
         # Parallel loop
         all_proba = Parallel(n_jobs=n_jobs, verbose=self.verbose,
                              backend="threading")(
-            delayed(_parallel_helper)(e, 'predict_proba', X)
-            for e in self.estimators_)
+            delayed(_parallel_helper)(e, 'predict_proba', X, x_std)
+            for e in estimators)
 
         # Reduce
         proba = all_proba[0]
@@ -512,7 +527,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
             for j in range(1, len(all_proba)):
                 proba += all_proba[j]
 
-            proba /= len(self.estimators_)
+            proba /= n_estimators
 
         else:
             for j in range(1, len(all_proba)):
@@ -520,11 +535,11 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
                     proba[k] += all_proba[j][k]
 
             for k in range(self.n_outputs_):
-                proba[k] /= self.n_estimators
+                proba[k] /= n_estimators
 
         return proba
 
-    def predict_log_proba(self, X):
+    def predict_log_proba(self, X, x_std=None):
         """Predict class log-probabilities for X.
 
         The predicted class log-probabilities of an input sample is computed as
@@ -545,7 +560,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
             The class probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         """
-        proba = self.predict_proba(X)
+        proba = self.predict_proba(X, x_std)
 
         if self.n_outputs_ == 1:
             return np.log(proba)
@@ -555,6 +570,60 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
                 proba[k] = np.log(proba[k])
 
             return proba
+
+    def predict_brut(self, X):
+        """Predict class probabilities for each tree for X.
+
+        The predicted class probabilities of an input sample for each tree
+
+        Parameters
+        ----------
+        X : array-like or sparse matrix of shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32`` and if a sparse matrix is provided
+            to a sparse ``csr_matrix``.
+
+        Returns
+        -------
+        p : array of shape = [n_estimators, n_samples, n_classes], or a list of n_outputs such arrays if n_outputs > 1.
+            The class probabilities of the input samples. The order of the
+            classes corresponds to that in the attribute `classes_`.
+
+        q: array of shape = [n_estimators, n_samples, 1], or a list of n_outputs such arrays if n_outputs > 1.
+            The predicted classes.
+        """
+        # Check data
+        X = check_array(X, dtype=DTYPE, accept_sparse="csr")
+
+        # estimators is the concatenation of real trees + tree pointers
+        estimators = np.concatenate(
+            (self.estimators_, self.supplement_estimators_), axis=0)
+        n_estimators = estimators.shape[0]
+
+        # Assign chunk of trees to jobs
+        n_jobs, n_trees, starts = _partition_estimators(n_estimators,
+                                                        self.n_jobs)
+
+        # Parallel loop
+        all_proba = Parallel(n_jobs=n_jobs, verbose=self.verbose,
+                             backend="threading")(
+            delayed(_parallel_helper)(e, 'predict_proba', X)
+            for e in estimators)
+
+        # get classes
+        all_proba = np.array(all_proba)
+        classes = np.zeros([all_proba.shape[0], all_proba.shape[1]])
+        if self.n_outputs_ == 1:
+            for j in range(len(all_proba)):
+                classes[j] = self.classes_.take(np.argmax(all_proba[j], axis=1), axis=0)
+
+            return all_proba, classes
+
+        else:
+            # TODO: Deal with multiple output
+            return None
+
+
 
 
 class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
@@ -586,7 +655,7 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
             verbose=verbose,
             warm_start=warm_start)
 
-    def predict(self, X):
+    def predict(self, X, x_std=None):
         """Predict regression target for X.
 
         The predicted regression target of an input sample is computed as the
@@ -607,18 +676,23 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
         # Check data
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
 
+        # estimators is the concatenation of real trees + tree pointers
+        estimators = np.concatenate(
+            (self.estimators_, self.supplement_estimators_), axis=0)
+        n_estimators = estimators.shape[0]
+
         # Assign chunk of trees to jobs
-        n_jobs, n_trees, starts = _partition_estimators(self.n_estimators,
+        n_jobs, n_trees, starts = _partition_estimators(n_estimators,
                                                         self.n_jobs)
 
         # Parallel loop
         all_y_hat = Parallel(n_jobs=n_jobs, verbose=self.verbose,
                              backend="threading")(
-            delayed(_parallel_helper)(e, 'predict', X)
-            for e in self.estimators_)
+            delayed(_parallel_helper)(e, 'predict', X, x_std)
+            for e in estimators)
 
         # Reduce
-        y_hat = sum(all_y_hat) / len(self.estimators_)
+        y_hat = sum(all_y_hat) / n_estimators
 
         return y_hat
 

@@ -30,6 +30,8 @@ from ..externals import six
 from ..feature_selection.from_model import _LearntSelectorMixin
 from ..utils import check_array, check_random_state
 
+from ..linear_model import Lasso
+from ..linear_model import LinearRegression
 
 from ._tree import Criterion
 from ._tree import Splitter
@@ -297,7 +299,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         return self
 
-    def predict(self, X):
+    def predict(self, X, x_std=None, mean = 0.0, std = 0.0):
         """Predict class or regression value for X.
 
         For a classification model, the predicted class for each sample in X is
@@ -316,6 +318,13 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
         """
+
+        # print "Classifier"
+        # print x_std
+        # print mean
+        # print std
+        # print ""
+
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
@@ -333,7 +342,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                              " input n_features is %s "
                              % (self.n_features_, n_features))
 
-        proba = self.tree_.predict(X)
+        proba = self.tree_.predict_noise(X, x_std, mean, std)
 
         # Classification
         if isinstance(self, ClassifierMixin):
@@ -389,30 +398,48 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         return self.tree_.random_pruning(version, coin)
 
-    def usage_pruning(self, X, alpha = 2):
+    def usage_pruning(self, X, y, alpha = 1.0):
         """Excute a post pruning method on a tree
         """
+        #########################
+        import time
+        #########################
+
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
             raise ValueError("No support for np.int64 index based "
                              "sparse matrices")
 
-        # Determine size of my sparse matrix
+        # Determine the size of the sparse matrix of nodes
         n_samples, n_features = X.shape
+        if n_samples != y.shape[0]:
+            raise ValueError("X and Y arrays doesn t match")
         node_count = self.tree_.get_node_count()
 
+        # Build the sparce matrix of nodes
         lil_nodes = lil_matrix((n_samples, node_count), dtype=np.int8)
-        self.tree_.usage_pruning(X, lil_nodes)
+        start = time.time()
+        self.tree_.usage_init(X, lil_nodes)
+        print time.time() - start
         csr_nodes = lil_nodes.tocsr()
 
-        print csr_nodes.toarray()
+        # Fit the Linear Model trained with L1 prior as regularizer
+        if alpha==0:
+            clf = LinearRegression()
+        else:
+            clf = Lasso(alpha=alpha)
+        start = time.time()
+        clf.fit(csr_nodes, y)
+        print time.time() - start
 
-    def noise_in_treshold_pruning(self, mean = 0, std = 0.5):
-        """Excute a post pruning method on a tree
-        """
-        pass
+        # Pruning in itself
+        start = time.time()
+        self.tree_.usage_pruning(0, clf.coef_)
+        print time.time() - start
 
+        # print clf.intercept_
+        # print csr_nodes.toarray()
 
     def get_size(self):
         """return the size of the tree (in Bytes)
@@ -577,7 +604,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             max_leaf_nodes=max_leaf_nodes,
             random_state=random_state)
 
-    def predict_proba(self, X):
+    def predict_proba(self, X, x_std=None, mean=0.0, std=0.0):
         """Predict class probabilities of the input samples X.
 
         Parameters
@@ -594,6 +621,13 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             The class probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         """
+
+        # print "Classifier"
+        # print x_std
+        # print mean
+        # print std
+        # print ""
+
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
@@ -611,7 +645,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                              " input n_features is %s "
                              % (self.n_features_, n_features))
 
-        proba = self.tree_.predict(X)
+        proba = self.tree_.predict_noise(X, x_std, mean, std)
 
         if self.n_outputs_ == 1:
             proba = proba[:, :self.n_classes_]
@@ -633,7 +667,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
 
             return all_proba
 
-    def predict_log_proba(self, X):
+    def predict_log_proba(self, X, x_std=None, mean=0.0, std=0.0):
         """Predict class log-probabilities of the input samples X.
 
         Parameters
@@ -650,7 +684,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             The class log-probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         """
-        proba = self.predict_proba(X)
+        proba = self.predict_proba(X, x_std, mean, std)
 
         if self.n_outputs_ == 1:
             return np.log(proba)

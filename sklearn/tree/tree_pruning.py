@@ -11,3 +11,23 @@ class Desision:
         if proba is None:
             proba = self.propability
         return self.random_state.rand() < proba
+
+    def noise(self, mean, std):
+        return self.random_state.normal(mean, std, 1)
+
+class TreePointer:
+
+    def __init__(self, clf, mean=0.0, std=0.0):
+        self.pointed_clf = clf
+        self.mean = mean
+        self.std = std
+
+    def predict(self, X, x_std=None):
+        return self.pointed_clf.predict(X, x_std, self.mean, self.std)
+
+    def predict_proba(self, X, x_std=None):
+        return self.pointed_clf.predict_proba(X, x_std, self.mean, self.std)
+
+    def predict_log_proba(self, X, x_std=None):
+        return self.pointed_clf.predict_log_proba(X, x_std, self.mean, self.std)
+

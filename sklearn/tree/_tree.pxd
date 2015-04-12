@@ -185,10 +185,13 @@ cdef class Tree:
     cdef np.ndarray _get_value_ndarray(self)
     cdef np.ndarray _get_node_ndarray(self)
 
+
     cpdef np.ndarray predict(self, object X)
     cpdef np.ndarray apply(self, object X)
-    cdef np.ndarray _apply_dense(self, object X)
-    cdef np.ndarray _apply_sparse_csr(self, object X)
+    cpdef np.ndarray predict_noise(self, object X, object x_std, float mean, float std)
+    cpdef np.ndarray apply_noise(self, object X, object x_std, float mean, float std)
+    cdef np.ndarray _apply_dense(self, object X, object x_std, float mean, float std)
+    cdef np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std)
 
     cpdef compute_feature_importances(self, normalize=*)
 
@@ -199,9 +202,11 @@ cdef class Tree:
     cdef int df_pruning_v2(self, SIZE_t root, object coin)
     cdef int df_pruning_v3(self, SIZE_t root, object coin)
 
-    cpdef int usage_pruning(self, object X, object lil_nodes)
-    cpdef int usage_dense(self, object X, object lil_nodes)
-    cpdef int usage_sparse_csr(self, object X, object lil_nodes)
+    cpdef int usage_pruning(self, SIZE_t root, object coef)
+    cdef bint is_deletable(self, SIZE_t root, object coef)
+    cpdef int usage_init(self, object X, object lil_nodes)
+    cdef int usage_init_dense(self, object X, object lil_nodes)
+    cdef int usage_init_sparse_csr(self, object X, object lil_nodes)
 
     ####### Getters ###########################################################
     cpdef int get_nb_childs(self, SIZE_t root)
