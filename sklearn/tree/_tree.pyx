@@ -3286,6 +3286,8 @@ cdef class Tree:
             XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
             XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
 
+
+        noise = Desision ()
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
@@ -3296,9 +3298,10 @@ cdef class Tree:
 
                     # Compute new threshold with noise
                     threshold = node.threshold
-                    if x_std is not None:
+                    if x_std is not None and std != 0:
                         feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
-                        threshold = threshold # + noise.noise(mu, feature_std)
+                        with gil:
+                            threshold = threshold + noise.noise(mean, feature_std)
 
                     if X_ptr[X_sample_stride * i +
                              X_fx_stride * node.feature] <= threshold:
@@ -3383,6 +3386,7 @@ cdef class Tree:
         safe_realloc(&X_sample, n_features * sizeof(DTYPE_t))
         safe_realloc(&feature_to_sample, n_features * sizeof(SIZE_t))
 
+        noise = Desision ()
         with nogil:
             memset(feature_to_sample, -1, n_features * sizeof(SIZE_t))
 
@@ -3406,7 +3410,8 @@ cdef class Tree:
                     threshold = node.threshold
                     if x_std is not None:
                         feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
-                        threshold = threshold # + noise.noise(mu, feature_std)
+                        with gil:
+                            threshold = threshold + noise.noise(mean, feature_std)
 
 
 
@@ -3539,7 +3544,7 @@ cdef class Tree:
             res1 = self.is_deletable(node.left_child, coef)
             res2 = self.is_deletable(node.right_child, coef)
 
-        return (res1 and res2)
+        return (res1 & res2)
 
     cpdef int usage_init(self, object X, object lil_nodes):
         # check input

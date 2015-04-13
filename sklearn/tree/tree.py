@@ -401,10 +401,6 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
     def usage_pruning(self, X, y, alpha = 1.0):
         """Excute a post pruning method on a tree
         """
-        #########################
-        import time
-        #########################
-
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
@@ -419,9 +415,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         # Build the sparce matrix of nodes
         lil_nodes = lil_matrix((n_samples, node_count), dtype=np.int8)
-        start = time.time()
         self.tree_.usage_init(X, lil_nodes)
-        print time.time() - start
         csr_nodes = lil_nodes.tocsr()
 
         # Fit the Linear Model trained with L1 prior as regularizer
@@ -429,17 +423,11 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
             clf = LinearRegression()
         else:
             clf = Lasso(alpha=alpha)
-        start = time.time()
         clf.fit(csr_nodes, y)
-        print time.time() - start
 
         # Pruning in itself
-        start = time.time()
         self.tree_.usage_pruning(0, clf.coef_)
-        print time.time() - start
 
-        # print clf.intercept_
-        # print csr_nodes.toarray()
 
     def get_size(self):
         """return the size of the tree (in Bytes)
