@@ -30,7 +30,8 @@ from ..externals import six
 from ..feature_selection.from_model import _LearntSelectorMixin
 from ..utils import check_array, check_random_state
 
-from ..linear_model import Lasso
+from ..linear_model import SGDClassifier
+from ..linear_model import SGDRegressor
 from ..linear_model import LinearRegression
 
 from ._tree import Criterion
@@ -105,6 +106,8 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         self.tree_ = None
         self.max_features_ = None
+
+        self.l1_clf_ = None
 
     def fit(self, X, y, sample_weight=None, check_input=True):
         """Build a decision tree from the training set (X, y).
@@ -342,7 +345,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                              " input n_features is %s "
                              % (self.n_features_, n_features))
 
-        proba = self.tree_.predict_noise(X, x_std, mean, std)
+        proba = self.tree_.predict_options(X, self.l1_clf_, x_std, mean, std)
 
         # Classification
         if isinstance(self, ClassifierMixin):
@@ -363,7 +366,6 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         else:
             if self.n_outputs_ == 1:
                 return proba[:, 0]
-
             else:
                 return proba[:, :, 0]
 
@@ -419,15 +421,28 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         csr_nodes = lil_nodes.tocsr()
 
         # Fit the Linear Model trained with L1 prior as regularizer
-        if alpha==0:
-            clf = LinearRegression()
+        # if alpha==-1:
+        #     clf = LassoCV(cv=20)
+        # elif alpha==0:
+        #     clf = LinearRegression()
+        # else:
+        #     clf = Lasso(alpha=alpha, max_iter=2000)
+        self.instantiate_l1_clf(loss='squared_loss', penalty='l1', alpha=alpha)
+        self.l1_clf_.fit(csr_nodes, y)
+
+        # Reducing coeficiant to 1-d array
+        if self.l1_clf_.coef_.ndim > 1:
+            coef = np.amax(np.fabs(self.l1_clf_.coef_), axis=0)
         else:
-            clf = Lasso(alpha=alpha)
-        clf.fit(csr_nodes, y)
+            coef = self.l1_clf_.coef_
 
         # Pruning in itself
-        self.tree_.usage_pruning(0, clf.coef_)
+        self.tree_.usage_pruning(0, coef)
 
+    def get_l1_clf(self):
+        """Return the l1 classifier
+        """
+        return self.l1_clf_
 
     def get_size(self):
         """return the size of the tree (in Bytes)
@@ -633,7 +648,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                              " input n_features is %s "
                              % (self.n_features_, n_features))
 
-        proba = self.tree_.predict_noise(X, x_std, mean, std)
+        proba = self.tree_.predict_options(X, self.l1_clf_, x_std, mean, std)
 
         if self.n_outputs_ == 1:
             proba = proba[:, :self.n_classes_]
@@ -682,6 +697,9 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                 proba[k] = np.log(proba[k])
 
             return proba
+
+    def instantiate_l1_clf(self, loss, penalty, alpha):
+        self.l1_clf_ =  SGDClassifier(loss=loss, penalty=penalty, alpha=alpha)
 
 
 class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
@@ -807,6 +825,9 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             random_state=random_state)
+
+    def instantiate_l1_clf(self, loss, penalty, alpha):
+        self.l1_clf_ = SGDRegressor(loss=loss, penalty=penalty, alpha=alpha)
 
 
 class ExtraTreeClassifier(DecisionTreeClassifier):

@@ -585,10 +585,6 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
 
         Returns
         -------
-        p : array of shape = [n_estimators, n_samples, n_classes], or a list of n_outputs such arrays if n_outputs > 1.
-            The class probabilities of the input samples. The order of the
-            classes corresponds to that in the attribute `classes_`.
-
         q: array of shape = [n_estimators, n_samples, 1], or a list of n_outputs such arrays if n_outputs > 1.
             The predicted classes.
         """
@@ -610,6 +606,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
             delayed(_parallel_helper)(e, 'predict_proba', X)
             for e in estimators)
 
+        # Do not reduce because only interested in class prediction
         # get classes
         all_proba = np.array(all_proba)
         classes = np.zeros([all_proba.shape[0], all_proba.shape[1]])
@@ -617,7 +614,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
             for j in range(len(all_proba)):
                 classes[j] = self.classes_.take(np.argmax(all_proba[j], axis=1), axis=0)
 
-            return all_proba, classes
+            return classes
 
         else:
             # TODO: Deal with multiple output
@@ -695,6 +692,45 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
         y_hat = sum(all_y_hat) / n_estimators
 
         return y_hat
+
+    def predict_brut(self, X, x_std=None):
+        """Predict regression target for X.
+
+        The predicted regression target of an input sample is computed as the
+        mean predicted regression targets of the trees in the forest.
+
+        Parameters
+        ----------
+        X : array-like or sparse matrix of shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32`` and if a sparse matrix is provided
+            to a sparse ``csr_matrix``.
+
+        Returns
+        -------
+        y : array of shape = [n_estimators, n_samples] or [n_samples, n_outputs]
+            The predicted values.
+        """
+        # Check data
+        X = check_array(X, dtype=DTYPE, accept_sparse="csr")
+
+        # estimators is the concatenation of real trees + tree pointers
+        estimators = np.concatenate(
+            (self.estimators_, self.supplement_estimators_), axis=0)
+        n_estimators = estimators.shape[0]
+
+        # Assign chunk of trees to jobs
+        n_jobs, n_trees, starts = _partition_estimators(n_estimators,
+                                                        self.n_jobs)
+
+        # Parallel loop
+        all_y_hat = Parallel(n_jobs=n_jobs, verbose=self.verbose,
+                             backend="threading")(
+            delayed(_parallel_helper)(e, 'predict', X, x_std)
+            for e in estimators)
+
+        return all_y_hat
+
 
     def _set_oob_score(self, X, y):
         """Compute out-of-bag scores"""

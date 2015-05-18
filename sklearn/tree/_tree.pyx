@@ -19,6 +19,10 @@ from libc.stdlib cimport calloc, free, realloc, qsort
 
 from libc.string cimport memcpy, memset
 from libc.math cimport log as ln
+from libc.math cimport sqrt
+from libc.math cimport cos
+from libc.math cimport sin
+from libc.math cimport M_PI as pi
 from cpython cimport Py_INCREF, PyObject
 
 import numpy as np
@@ -31,6 +35,7 @@ from sklearn.tree._utils cimport Stack, StackRecord
 from sklearn.tree._utils cimport PriorityHeap, PriorityHeapRecord
 
 from tree_pruning import Desision
+from sklearn.utils import check_random_state
 
 
 cdef extern from "numpy/arrayobject.h":
@@ -3218,9 +3223,9 @@ cdef class Tree:
             out = out.reshape(X.shape[0], self.max_n_classes)
         return out
 
-    cpdef np.ndarray predict_noise(self, object X, object x_std, float mean, float std):
+    cpdef np.ndarray predict_options(self, object X, object l1_clf, object x_std, float mean, float std):
         """Predict target for X."""
-        out = self._get_value_ndarray().take(self.apply_noise(X, x_std, mean, std),
+        out = self._get_value_ndarray().take(self.apply_options(X, l1_clf, x_std, mean, std),
                                              axis=0, mode='clip')
         if self.n_outputs == 1:
             out = out.reshape(X.shape[0], self.max_n_classes)
@@ -3229,20 +3234,20 @@ cdef class Tree:
     cpdef np.ndarray apply(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
         if issparse(X):
-            return self._apply_sparse_csr(X, None, 0, 0)
+            return self._apply_sparse_csr(X, None, None, 0, 0)
         else:
-            return self._apply_dense(X, None, 0, 0)
+            return self._apply_dense(X, None, None, 0, 0)
 
 
-    cpdef np.ndarray apply_noise(self, object X, object x_std, float mean, float std):
+    cpdef np.ndarray apply_options(self, object X, object l1_clf, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in X."""
         if issparse(X):
-            return self._apply_sparse_csr(X, x_std, mean, std)
+            return self._apply_sparse_csr(X, l1_clf, x_std, mean, std)
         else:
-            return self._apply_dense(X, x_std, mean, std)
+            return self._apply_dense(X, l1_clf, x_std, mean, std)
 
 
-    cdef inline np.ndarray _apply_dense(self, object X, object x_std, float mean, float std):
+    cdef inline np.ndarray _apply_dense(self, object X, object l1_clf, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in X."""
 
         # Check input
@@ -3273,21 +3278,31 @@ cdef class Tree:
         cdef SIZE_t i = 0
         cdef DTYPE_t feature_value = 0.
 
-        # Noise in threshold
-        cdef object noise = Desision ()
+        # Noise in tresholds
+        rand = Random ()
         cdef DOUBLE_t feature_std = 0
         cdef DOUBLE_t threshold = 0
         cdef np.ndarray XSTD_ndarray
         cdef DTYPE_t* XSTD_ptr
         cdef SIZE_t XSTD_fx_stride = 0
-
-        if x_std is not None:
+        if x_std is not None and std != 0:
+            if x_std.dtype != np.float32:
+                raise ValueError("x_std.dtype should be np.float32")
             XSTD_ndarray = x_std
             XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
             XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
 
+        # Usage pruning (L1 regularization)
+        cdef np.ndarray XL1_ndarray
+        cdef DTYPE_t* XL1_ptr
+        cdef SIZE_t XL1_fx_stride = 0
+        if l1_clf is not None:
+            if l1_clf.dtype != np.float32:
+                raise ValueError("l1_clf.dtype should be np.float32")
+            XL1_ndarray = l1_clf.coef_
+            XL1_ptr = <DTYPE_t*> XSTD_ndarray.data
+            XL1_fx_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
 
-        noise = Desision ()
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
@@ -3300,8 +3315,7 @@ cdef class Tree:
                     threshold = node.threshold
                     if x_std is not None and std != 0:
                         feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
-                        with gil:
-                            threshold = threshold + noise.noise(mean, feature_std)
+                        threshold = threshold + rand.next_gaussian(mean, feature_std)
 
                     if X_ptr[X_sample_stride * i +
                              X_fx_stride * node.feature] <= threshold:
@@ -3325,7 +3339,7 @@ cdef class Tree:
 
         return out
 
-    cdef inline np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std):
+    cdef inline np.ndarray _apply_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in sparse X.
 
         """
@@ -3365,18 +3379,30 @@ cdef class Tree:
         cdef SIZE_t i = 0
         cdef INT32_t k = 0
 
-        # Noise in threshold
-        cdef object noise = Desision ()
+        # Noise in tresholds
+        rand = Random ()
         cdef DOUBLE_t feature_std = 0
         cdef DOUBLE_t threshold = 0
         cdef np.ndarray XSTD_ndarray
         cdef DTYPE_t* XSTD_ptr
         cdef SIZE_t XSTD_fx_stride = 0
-
-        if x_std is not None:
+        if x_std is not None and std != 0:
+            if x_std.dtype != np.float32:
+                raise ValueError("x_std.dtype should be np.float32")
             XSTD_ndarray = x_std
             XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
             XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+
+        # Usage pruning (L1 regularization)
+        cdef np.ndarray XL1_ndarray
+        cdef DTYPE_t* XL1_ptr
+        cdef SIZE_t XL1_fx_stride = 0
+        if l1_clf is not None:
+            if l1_clf.dtype != np.float32:
+                raise ValueError("l1_clf.dtype should be np.float32")
+            XL1_ndarray = l1_clf.coef_
+            XL1_ptr = <DTYPE_t*> XSTD_ndarray.data
+            XL1_fx_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
 
         # feature_to_sample as a data structure records the last seen sample
         # for each feature; functionally, it is an efficient way to identify
@@ -3408,11 +3434,9 @@ cdef class Tree:
 
                     # Compute new threshold with noise
                     threshold = node.threshold
-                    if x_std is not None:
+                    if x_std is not None and std != 0:
                         feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
-                        with gil:
-                            threshold = threshold + noise.noise(mean, feature_std)
-
+                        threshold = threshold + rand.next_gaussian(mean, feature_std)
 
 
                     if feature_value <= threshold:
@@ -3848,13 +3872,37 @@ cdef class Tree:
     #     return nb
 
 
-
-
-
-
 # =============================================================================
 # Utils
 # =============================================================================
+
+cdef class Random:
+    cdef UINT32_t seed
+    cdef double next
+    cdef bint generate
+    cdef double epsilon
+
+    def __cinit__(self):
+        random_state = check_random_state(None)
+        self.seed = random_state.randint(np.iinfo(np.int32).max)
+        self.next = 0
+        self.generate = 0
+        self.epsilon = 2.22507e-308
+
+    cdef double next_gaussian(self, double mu, double sigma) nogil:
+        cdef double x1, x2, w
+
+        self.generate = not(self.generate)
+        if not(self.generate):
+            return self.next
+        else:
+            x1 = rand_uniform(0, 1, &self.seed)
+            x2 = rand_uniform(0, 1, &self.seed)
+            while x1 <= self.epsilon:
+                x1 = rand_uniform(0, 1, &self.seed)
+                x2 = rand_uniform(0, 1, &self.seed)
+            self.next = sqrt(-2 * ln(x1)) * sin(2 * pi * x2) * sigma + mu
+            return sqrt(-2 * ln(x1)) * cos(2 * pi * x2) * sigma + mu
 
 # safe_realloc(&p, n) resizes the allocation of p to n * sizeof(*p) bytes or
 # raises a MemoryError. It never calls free, since that's __dealloc__'s job.
@@ -3921,5 +3969,3 @@ cdef inline double rand_uniform(double low, double high,
 
 cdef inline double log(double x) nogil:
     return ln(x) / ln(2.0)
-
-

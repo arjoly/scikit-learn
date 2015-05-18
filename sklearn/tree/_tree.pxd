@@ -188,10 +188,12 @@ cdef class Tree:
 
     cpdef np.ndarray predict(self, object X)
     cpdef np.ndarray apply(self, object X)
-    cpdef np.ndarray predict_noise(self, object X, object x_std, float mean, float std)
-    cpdef np.ndarray apply_noise(self, object X, object x_std, float mean, float std)
-    cdef np.ndarray _apply_dense(self, object X, object x_std, float mean, float std)
-    cdef np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std)
+
+    cpdef np.ndarray predict_options(self, object X, object l1_clf, object x_std, float mean, float std)
+    cpdef np.ndarray apply_options(self, object X, object l1_clf, object x_std, float mean, float std)
+
+    cdef np.ndarray _apply_dense(self, object X, object l1_clf, object x_std, float mean, float std)
+    cdef np.ndarray _apply_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std)
 
     cpdef compute_feature_importances(self, normalize=*)
 
@@ -215,7 +217,6 @@ cdef class Tree:
     cpdef int get_max_depth(self, SIZE_t root, int depth)
     cpdef int get_size(self)
     cpdef int get_node_count(self)
-
 
 
 # =============================================================================

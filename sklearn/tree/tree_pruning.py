@@ -12,11 +12,6 @@ class Desision:
             proba = self.propability
         return self.random_state.rand() < proba
 
-    def noise(self, mean, std):
-        if std <= 0:
-            return mean
-        return self.random_state.normal(mean, std, 1)[0]
-
 class TreePointer:
 
     def __init__(self, clf, mean=0.0, std=0.0):
