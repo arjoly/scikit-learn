@@ -35,7 +35,7 @@ from sklearn.tree._utils cimport Stack, StackRecord
 from sklearn.tree._utils cimport PriorityHeap, PriorityHeapRecord
 
 from tree_pruning import Desision
-from sklearn.utils import check_random_state
+from sklearn.utils import check_array, check_random_state
 
 
 cdef extern from "numpy/arrayobject.h":
@@ -3215,6 +3215,14 @@ cdef class Tree:
 
         return node_id
 
+
+
+
+
+
+
+
+
     cpdef np.ndarray predict(self, object X):
         """Predict target for X."""
         out = self._get_value_ndarray().take(self.apply(X),
@@ -3223,31 +3231,192 @@ cdef class Tree:
             out = out.reshape(X.shape[0], self.max_n_classes)
         return out
 
+
     cpdef np.ndarray predict_options(self, object X, object l1_clf, object x_std, float mean, float std):
-        """Predict target for X."""
-        out = self._get_value_ndarray().take(self.apply_options(X, l1_clf, x_std, mean, std),
-                                             axis=0, mode='clip')
-        if self.n_outputs == 1:
-            out = out.reshape(X.shape[0], self.max_n_classes)
+        """Predict target for X with compression options."""
+        if l1_clf is not None:
+            out = self.apply_options(X, l1_clf, x_std, mean, std)
+        else:
+            out = self._get_value_ndarray().take(self.apply_options(X, l1_clf, x_std, mean, std),
+                                                 axis=0, mode='clip')
+            if self.n_outputs == 1:
+                out = out.reshape(X.shape[0], self.max_n_classes)
         return out
+
 
     cpdef np.ndarray apply(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
         if issparse(X):
-            return self._apply_sparse_csr(X, None, None, 0, 0)
+            return self._apply_sparse_csr(X, None, 0, 0)
         else:
-            return self._apply_dense(X, None, None, 0, 0)
+            return self._apply_dense(X, None, 0, 0)
 
 
     cpdef np.ndarray apply_options(self, object X, object l1_clf, object x_std, float mean, float std):
-        """Finds the terminal region (=leaf node) for each sample in X."""
-        if issparse(X):
-            return self._apply_sparse_csr(X, l1_clf, x_std, mean, std)
+        """Finds the terminal region (=leaf node) for each sample in X.
+        with compression options"""
+        if l1_clf is None:
+            if issparse(X):
+                return self._apply_sparse_csr(X, x_std, mean, std)
+            else:
+                return self._apply_dense(X, x_std, mean, std)
         else:
-            return self._apply_dense(X, l1_clf, x_std, mean, std)
+            if issparse(X):
+                return self._apply_l1_sparse_csr(X, l1_clf, x_std, mean, std)
+            else:
+                return self._apply_l1_dense(X, l1_clf, x_std, mean, std)
+
+    def sigmoid(z):
+        if(z<10):
+            return 0
+        elif(z>10):
+            return 1
+        else:
+            return 1.0 / (1.0 + np.exp(-1.0 * z))
+
+    cdef inline np.ndarray _apply_l1_dense(self, object X, object l1_clf, object x_std, float mean, float std):
+        """Compute the prediction for each sample in X."""
+
+        # Check input
+        if not isinstance(X, np.ndarray):
+            raise ValueError("X should be in np.ndarray format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        if x_std is not None and not isinstance(x_std, np.ndarray):
+            raise ValueError("x_std should be None or in np.ndarray format,"
+                             + " got %s" % type(x_std))
+
+        if x_std is not None and std != 0 and  x_std.dtype != np.float32:
+            raise ValueError("x_std.dtype should be np.float32")
+
+        if l1_clf is None:
+            raise ValueError("l1_clf can not be None")
+
+        # Extract input
+        cdef np.ndarray X_ndarray = X
+        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
+        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
+        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        cdef SIZE_t n_samples = X.shape[0]
+
+        # Initialize output
+        cdef SIZE_t n_classes = l1_clf.coef_.shape[0]
+        cdef np.ndarray out = np.zeros((n_samples, n_classes), dtype=np.float32)
+        cdef DTYPE_t* out_ptr = <DTYPE_t*> out.data
+        cdef SIZE_t out_sample_stride = <SIZE_t> out.strides[0] / <SIZE_t> out.itemsize
+        cdef SIZE_t out_fx_stride = <SIZE_t> out.strides[1] / <SIZE_t> out.itemsize
+
+        # Initialize auxiliary data-structure
+        cdef Node* node = NULL
+        cdef SIZE_t i = 0
+        cdef SIZE_t j = 0
+        cdef DTYPE_t feature_value = 0.
+
+        # Noise in tresholds
+        rand = Random ()
+        cdef DOUBLE_t feature_std = 0
+        cdef DOUBLE_t threshold = 0
+        cdef np.ndarray XSTD_ndarray
+        cdef DTYPE_t* XSTD_ptr
+        cdef SIZE_t XSTD_fx_stride = 0
+        if x_std is not None and std != 0:
+            XSTD_ndarray = x_std
+            XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
+            XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+
+        # Usage pruning (L1 regularization)
+        cdef np.ndarray l1_ndarray = check_array(l1_clf.coef_, dtype=X.dtype)
+        cdef DTYPE_t* l1_ptr = <DTYPE_t*> l1_ndarray.data
+        cdef SIZE_t l1_sample_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
+        cdef SIZE_t l1_fx_stride = <SIZE_t> l1_clf.coef_.strides[1] / <SIZE_t> l1_clf.coef_.itemsize
+
+        with nogil:
+            for i in range(n_samples):
+                node = self.nodes
+
+                for j in range(n_classes):
+                    out_ptr[out_sample_stride * i + out_fx_stride * j] += l1_ptr[l1_sample_stride * j + l1_fx_stride * (<SIZE_t>(node - self.nodes))] * X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+
+                # While node not a leaf
+                while node.left_child != _TREE_LEAF:
+                    # ... and node.right_child != _TREE_LEAF:
+
+                    # Compute new threshold with noise
+                    threshold = node.threshold
+                    if x_std is not None and std != 0:
+                        feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
+                        threshold = threshold + rand.next_gaussian(mean, feature_std)
+
+                    if X_ptr[X_sample_stride * i +
+                             X_fx_stride * node.feature] <= threshold:
+                        node = &self.nodes[node.left_child]
+                    else:
+                        node = &self.nodes[node.right_child]
+
+                    for j in range(n_classes):
+                        out_ptr[out_sample_stride * i + out_fx_stride * j] += l1_ptr[l1_sample_stride * j + l1_fx_stride * (<SIZE_t>(node - self.nodes))] * X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+
+        out = out + l1_clf.intercept_
+
+        out *= -1
+        np.exp(out, out)
+        out += 1
+        np.reciprocal(out, out)
+        if n_classes == 1:
+            return np.vstack([1 - out, out]).T
+        else:
+            # OvR normalization, like LibLinear's predict_probability
+            out /= out.sum(axis=1).reshape((out.shape[0], -1))
+        return out
+
+    cdef inline np.ndarray _apply_l1_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std):
+        raise NotImplementedError('The use of csr matrix with L1 norm regularization is not yet implemented')
 
 
-    cdef inline np.ndarray _apply_dense(self, object X, object l1_clf, object x_std, float mean, float std):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    cdef inline np.ndarray _apply_dense(self, object X, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in X."""
 
         # Check input
@@ -3261,6 +3430,9 @@ cdef class Tree:
         if x_std is not None and not isinstance(x_std, np.ndarray):
             raise ValueError("x_std should be None or in np.ndarray format,"
                              + " got %s" % type(x_std))
+
+        if x_std is not None and std != 0 and  x_std.dtype != np.float32:
+            raise ValueError("x_std.dtype should be np.float32")
 
         # Extract input
         cdef np.ndarray X_ndarray = X
@@ -3286,22 +3458,9 @@ cdef class Tree:
         cdef DTYPE_t* XSTD_ptr
         cdef SIZE_t XSTD_fx_stride = 0
         if x_std is not None and std != 0:
-            if x_std.dtype != np.float32:
-                raise ValueError("x_std.dtype should be np.float32")
             XSTD_ndarray = x_std
             XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
             XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
-
-        # Usage pruning (L1 regularization)
-        cdef np.ndarray XL1_ndarray
-        cdef DTYPE_t* XL1_ptr
-        cdef SIZE_t XL1_fx_stride = 0
-        if l1_clf is not None:
-            if l1_clf.dtype != np.float32:
-                raise ValueError("l1_clf.dtype should be np.float32")
-            XL1_ndarray = l1_clf.coef_
-            XL1_ptr = <DTYPE_t*> XSTD_ndarray.data
-            XL1_fx_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
 
         with nogil:
             for i in range(n_samples):
@@ -3339,7 +3498,7 @@ cdef class Tree:
 
         return out
 
-    cdef inline np.ndarray _apply_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std):
+    cdef inline np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in sparse X.
 
         """
@@ -3354,6 +3513,9 @@ cdef class Tree:
         if x_std is not None and not isinstance(x_std, np.ndarray):
             raise ValueError("x_std should be None or in np.ndarray format,"
                              + " got %s" % type(x_std))
+
+        if x_std is not None and std != 0 and  x_std.dtype != np.float32:
+            raise ValueError("x_std.dtype should be np.float32")
 
         # Extract input
         cdef np.ndarray[ndim=1, dtype=DTYPE_t] X_data_ndarray = X.data
@@ -3387,22 +3549,9 @@ cdef class Tree:
         cdef DTYPE_t* XSTD_ptr
         cdef SIZE_t XSTD_fx_stride = 0
         if x_std is not None and std != 0:
-            if x_std.dtype != np.float32:
-                raise ValueError("x_std.dtype should be np.float32")
             XSTD_ndarray = x_std
             XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
             XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
-
-        # Usage pruning (L1 regularization)
-        cdef np.ndarray XL1_ndarray
-        cdef DTYPE_t* XL1_ptr
-        cdef SIZE_t XL1_fx_stride = 0
-        if l1_clf is not None:
-            if l1_clf.dtype != np.float32:
-                raise ValueError("l1_clf.dtype should be np.float32")
-            XL1_ndarray = l1_clf.coef_
-            XL1_ptr = <DTYPE_t*> XSTD_ndarray.data
-            XL1_fx_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
 
         # feature_to_sample as a data structure records the last seen sample
         # for each feature; functionally, it is an efficient way to identify

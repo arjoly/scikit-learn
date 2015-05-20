@@ -346,6 +346,8 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                              % (self.n_features_, n_features))
 
         proba = self.tree_.predict_options(X, self.l1_clf_, x_std, mean, std)
+        print proba.shape
+        print proba
 
         # Classification
         if isinstance(self, ClassifierMixin):
@@ -368,6 +370,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                 return proba[:, 0]
             else:
                 return proba[:, :, 0]
+
 
     @property
     def feature_importances_(self):
@@ -431,6 +434,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.l1_clf_.fit(csr_nodes, y)
 
         # Reducing coeficiant to 1-d array
+        print 'Coef shape {0}'.format(self.l1_clf_.coef_.shape)
         if self.l1_clf_.coef_.ndim > 1:
             coef = np.amax(np.fabs(self.l1_clf_.coef_), axis=0)
         else:
@@ -624,12 +628,6 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             The class probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         """
-
-        # print "Classifier"
-        # print x_std
-        # print mean
-        # print std
-        # print ""
 
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or

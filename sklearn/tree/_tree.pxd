@@ -192,8 +192,10 @@ cdef class Tree:
     cpdef np.ndarray predict_options(self, object X, object l1_clf, object x_std, float mean, float std)
     cpdef np.ndarray apply_options(self, object X, object l1_clf, object x_std, float mean, float std)
 
-    cdef np.ndarray _apply_dense(self, object X, object l1_clf, object x_std, float mean, float std)
-    cdef np.ndarray _apply_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std)
+    cdef np.ndarray _apply_dense(self, object X, object x_std, float mean, float std)
+    cdef np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std)
+    cdef np.ndarray _apply_l1_dense(self, object X, object l1_clf, object x_std, float mean, float std)
+    cdef np.ndarray _apply_l1_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std)
 
     cpdef compute_feature_importances(self, normalize=*)
 
