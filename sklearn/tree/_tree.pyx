@@ -197,6 +197,16 @@ cdef class Criterion:
 
         pass
 
+    cdef double approx_impurity_improvement(self) nogil:
+        """Approximate the impurity reduction removing constants for a split"""
+
+        cdef double impurity_left
+        cdef double impurity_right
+        self.children_impurity(&impurity_left, &impurity_right)
+
+        return (- self.weighted_n_right * impurity_right
+                - self.weighted_n_left * impurity_left)
+
     cdef double impurity_improvement(self, double impurity) nogil:
         """Placeholder for improvement in impurity after a split.
 
@@ -436,7 +446,6 @@ cdef class ClassificationCriterion(Criterion):
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t* n_classes = self.n_classes
         cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
         cdef double* label_count_left = self.label_count_left
         cdef double* label_count_right = self.label_count_right
 
@@ -721,14 +730,8 @@ cdef class RegressionCriterion(Criterion):
             = (\sum_i^n y_i ** 2) - n_samples * y_bar ** 2
     """
 
-    cdef double* mean_left
-    cdef double* mean_right
-    cdef double* mean_total
-    cdef double* sq_sum_left
-    cdef double* sq_sum_right
+    cdef double* sq_sum_tmp
     cdef double* sq_sum_total
-    cdef double* var_left
-    cdef double* var_right
     cdef double* sum_left
     cdef double* sum_right
     cdef double* sum_total
@@ -760,39 +763,21 @@ cdef class RegressionCriterion(Criterion):
 
         # Allocate accumulators. Make sure they are NULL, not uninitialized,
         # before an exception can be raised (which triggers __dealloc__).
-        self.mean_left = NULL
-        self.mean_right = NULL
-        self.mean_total = NULL
-        self.sq_sum_left = NULL
-        self.sq_sum_right = NULL
+        self.sq_sum_tmp = NULL
         self.sq_sum_total = NULL
-        self.var_left = NULL
-        self.var_right = NULL
         self.sum_left = NULL
         self.sum_right = NULL
         self.sum_total = NULL
 
         # Allocate memory for the accumulators
-        self.mean_left = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_right = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_total = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_left = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_right = <double*> calloc(n_outputs, sizeof(double))
+        self.sq_sum_tmp = <double*> calloc(n_outputs, sizeof(double))
         self.sq_sum_total = <double*> calloc(n_outputs, sizeof(double))
-        self.var_left = <double*> calloc(n_outputs, sizeof(double))
-        self.var_right = <double*> calloc(n_outputs, sizeof(double))
         self.sum_left = <double*> calloc(n_outputs, sizeof(double))
         self.sum_right = <double*> calloc(n_outputs, sizeof(double))
         self.sum_total = <double*> calloc(n_outputs, sizeof(double))
 
-        if (self.mean_left == NULL or
-                self.mean_right == NULL or
-                self.mean_total == NULL or
-                self.sq_sum_left == NULL or
-                self.sq_sum_right == NULL or
+        if (self.sq_sum_tmp == NULL or
                 self.sq_sum_total == NULL or
-                self.var_left == NULL or
-                self.var_right == NULL or
                 self.sum_left == NULL or
                 self.sum_right == NULL or
                 self.sum_total == NULL):
@@ -800,15 +785,8 @@ cdef class RegressionCriterion(Criterion):
 
     def __dealloc__(self):
         """Destructor"""
-
-        free(self.mean_left)
-        free(self.mean_right)
-        free(self.mean_total)
-        free(self.sq_sum_left)
-        free(self.sq_sum_right)
+        free(self.sq_sum_tmp)
         free(self.sq_sum_total)
-        free(self.var_left)
-        free(self.var_right)
         free(self.sum_left)
         free(self.sum_right)
         free(self.sum_total)
@@ -840,16 +818,7 @@ cdef class RegressionCriterion(Criterion):
 
         # Initialize accumulators
         cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
         cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
         cdef double* sum_total = self.sum_total
 
         cdef SIZE_t i = 0
@@ -860,16 +829,7 @@ cdef class RegressionCriterion(Criterion):
         cdef DOUBLE_t w = 1.0
 
         cdef SIZE_t n_bytes = n_outputs * sizeof(double)
-        memset(mean_left, 0, n_bytes)
-        memset(mean_right, 0, n_bytes)
-        memset(mean_total, 0, n_bytes)
-        memset(sq_sum_left, 0, n_bytes)
-        memset(sq_sum_right, 0, n_bytes)
         memset(sq_sum_total, 0, n_bytes)
-        memset(var_left, 0, n_bytes)
-        memset(var_right, 0, n_bytes)
-        memset(sum_left, 0, n_bytes)
-        memset(sum_right, 0, n_bytes)
         memset(sum_total, 0, n_bytes)
 
         for p in range(start, end):
@@ -888,45 +848,20 @@ cdef class RegressionCriterion(Criterion):
 
         self.weighted_n_node_samples = weighted_n_node_samples
 
-        for k in range(n_outputs):
-            mean_total[k] = sum_total[k] / weighted_n_node_samples
-
         # Reset to pos=start
         self.reset()
 
     cdef void reset(self) nogil:
         """Reset the criterion at pos=start."""
-        self.pos = self.start
+        cdef SIZE_t n_bytes = self.n_outputs * sizeof(double)
+
+        memset(self.sum_left, 0, n_bytes)
+        memcpy(self.sum_right, self.sum_total, n_bytes)
 
         self.weighted_n_left = 0.0
         self.weighted_n_right = self.weighted_n_node_samples
 
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double* sum_total = self.sum_total
-
-        cdef SIZE_t k = 0
-
-        for k in range(n_outputs):
-            mean_right[k] = mean_total[k]
-            mean_left[k] = 0.0
-            sq_sum_right[k] = sq_sum_total[k]
-            sq_sum_left[k] = 0.0
-            var_right[k] = (sq_sum_right[k] / weighted_n_node_samples -
-                            mean_right[k] * mean_right[k])
-            var_left[k] = 0.0
-            sum_right[k] = sum_total[k]
-            sum_left[k] = 0.0
+        self.pos = self.start
 
     cdef void update(self, SIZE_t new_pos) nogil:
         """Updated statistics by moving samples[pos:new_pos] to the left."""
@@ -939,24 +874,15 @@ cdef class RegressionCriterion(Criterion):
         cdef SIZE_t pos = self.pos
 
         cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
         cdef double* sum_left = self.sum_left
         cdef double* sum_right = self.sum_right
-
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
+        cdef double* sum_total = self.sum_total
 
         cdef SIZE_t i
         cdef SIZE_t p
         cdef SIZE_t k
         cdef DOUBLE_t w = 1.0
         cdef DOUBLE_t diff_w = 0.0
-        cdef DOUBLE_t y_ik, w_y_ik
 
         # Note: We assume start <= pos < new_pos <= end
         for p in range(pos, new_pos):
@@ -966,30 +892,15 @@ cdef class RegressionCriterion(Criterion):
                 w = sample_weight[i]
 
             for k in range(n_outputs):
-                y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
-
-                sum_left[k] += w_y_ik
-                sum_right[k] -= w_y_ik
-
-                sq_sum_left[k] += w_y_ik * y_ik
-                sq_sum_right[k] -= w_y_ik * y_ik
+                sum_left[k] += w * y[i * y_stride + k]
 
             diff_w += w
 
-        weighted_n_left += diff_w
-        weighted_n_right -= diff_w
-
         for k in range(n_outputs):
-            mean_left[k] = sum_left[k] / weighted_n_left
-            mean_right[k] = sum_right[k] / weighted_n_right
-            var_left[k] = (sq_sum_left[k] / weighted_n_left -
-                           mean_left[k] * mean_left[k])
-            var_right[k] = (sq_sum_right[k] / weighted_n_right -
-                            mean_right[k] * mean_right[k])
+            sum_right[k] = sum_total[k] - sum_left[k]
 
-        self.weighted_n_left = weighted_n_left
-        self.weighted_n_right = weighted_n_right
+        self.weighted_n_left += diff_w
+        self.weighted_n_right -= diff_w
 
         self.pos = new_pos
 
@@ -1002,7 +913,13 @@ cdef class RegressionCriterion(Criterion):
 
     cdef void node_value(self, double* dest) nogil:
         """Compute the node value of samples[start:end] into dest."""
-        memcpy(dest, self.mean_total, self.n_outputs * sizeof(double))
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef double* sum_total = self.sum_total
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef SIZE_t k = 0
+
+        for k in range(n_outputs):
+            dest[k] = sum_total[k] / weighted_n_node_samples
 
 
 cdef class MSE(RegressionCriterion):
@@ -1015,32 +932,101 @@ cdef class MSE(RegressionCriterion):
            samples[start:end]."""
         cdef SIZE_t n_outputs = self.n_outputs
         cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* mean_total = self.mean_total
+        cdef double* sum_total = self.sum_total
         cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef double mean_total_k = 0.
         cdef double total = 0.0
         cdef SIZE_t k
 
         for k in range(n_outputs):
+            mean_total_k = sum_total[k] / weighted_n_node_samples
             total += (sq_sum_total[k] / weighted_n_node_samples -
-                      mean_total[k] * mean_total[k])
+                      mean_total_k * mean_total_k)
 
         return total / n_outputs
+
+    cdef double approx_impurity_improvement(self) nogil:
+        """Approximate the impurity reduction removing constants for a split"""
+        cdef SIZE_t n_outputs = self.n_outputs
+
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef double weighted_n_left = self.weighted_n_left
+        cdef double weighted_n_right = self.weighted_n_right
+
+        cdef double* sum_left = self.sum_left
+        cdef double* sum_right = self.sum_right
+
+        cdef SIZE_t k
+        cdef double approx_impuriy_left = 0.
+        cdef double approx_impuriy_right = 0.
+
+        for k in range(n_outputs):
+            approx_impuriy_left += sum_left[k] * sum_left[k]
+            approx_impuriy_right += sum_right[k] * sum_right[k]
+
+        return (approx_impuriy_left / weighted_n_left +
+                approx_impuriy_right / weighted_n_right)
 
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil:
         """Evaluate the impurity in children nodes, i.e. the impurity of the
            left child (samples[start:pos]) and the impurity the right child
            (samples[pos:end])."""
+
+        cdef DOUBLE_t* y = self.y
+        cdef SIZE_t y_stride = self.y_stride
+        cdef DOUBLE_t* sample_weight = self.sample_weight
+
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t pos = self.pos
+        cdef SIZE_t start = self.start
+
         cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
+
+        cdef double* sum_left = self.sum_left
+        cdef double* sum_right = self.sum_right
+        cdef double* sq_sum_tmp = self.sq_sum_tmp
+        cdef double* sq_sum_total = self.sq_sum_total
+        cdef double weighted_n_left = self.weighted_n_left
+        cdef double weighted_n_right = self.weighted_n_right
+
         cdef double total_left = 0.0
         cdef double total_right = 0.0
-        cdef SIZE_t k
+        cdef double mean_left_k = 0.0
+        cdef double mean_right_k = 0.0
 
+        cdef SIZE_t i
+        cdef SIZE_t p
+        cdef SIZE_t k
+        cdef DOUBLE_t w = 1.0
+        cdef DOUBLE_t diff_w = 0.0
+        cdef DOUBLE_t y_ik, w_y_ik
+
+        # Compute squared sum
+        cdef SIZE_t n_bytes = self.n_outputs * sizeof(double)
+        memset(sq_sum_tmp, 0, n_bytes)
+
+        for p in range(start, pos):
+            i = samples[p]
+
+            if sample_weight != NULL:
+                w = sample_weight[i]
+
+            for k in range(n_outputs):
+                y_ik = y[i * y_stride + k]
+                w_y_ik = w * y_ik
+
+                sq_sum_tmp[k] += w_y_ik * y_ik
+
+        # Compute impurity
         for k in range(n_outputs):
-            total_left += var_left[k]
-            total_right += var_right[k]
+            mean_left_k = sum_left[k] / weighted_n_left
+            total_left += (sq_sum_tmp[k] / weighted_n_left -
+                           mean_left_k * mean_left_k)
+
+            mean_right_k = sum_right[k] / weighted_n_right
+            total_right += ((sq_sum_total[k] - sq_sum_tmp[k]) / weighted_n_right -
+                            mean_right_k * mean_right_k)
 
         impurity_left[0] = total_left / n_outputs
         impurity_right[0] = total_right / n_outputs
@@ -1328,6 +1314,8 @@ cdef class BestSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
+        cdef double current_approx_impurity = - INFINITY
+        cdef double best_approx_impurity = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -1442,11 +1430,10 @@ cdef class BestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current.improvement = self.criterion.impurity_improvement(impurity)
+                            current_approx_impurity = self.criterion.approx_impurity_improvement()
 
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
+                            if current_approx_impurity > best_approx_impurity:
+                                best_approx_impurity = current_approx_impurity
                                 current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
 
                                 if current.threshold == Xf[p]:
@@ -1470,6 +1457,12 @@ cdef class BestSplitter(BaseDenseSplitter):
                     tmp = samples[partition_end]
                     samples[partition_end] = samples[p]
                     samples[p] = tmp
+
+            self.criterion.reset()
+            self.criterion.update(best.pos)
+            best.improvement = self.criterion.impurity_improvement(impurity)
+            self.criterion.children_impurity(&best.impurity_left,
+                                             &best.impurity_right)
 
         # Respect invariant for constant features: the original order of
         # element in features[:n_known_constants] must be preserved for sibling
@@ -1627,6 +1620,8 @@ cdef class RandomSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
+        cdef double current_approx_impurity = - INFINITY
+        cdef double best_approx_impurity = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -1759,29 +1754,36 @@ cdef class RandomSplitter(BaseDenseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current.improvement = self.criterion.impurity_improvement(impurity)
+                    current_approx_impurity = self.criterion.approx_impurity_improvement()
 
-                    if current.improvement > best.improvement:
-                        self.criterion.children_impurity(&current.impurity_left,
-                                                         &current.impurity_right)
+                    if current_approx_impurity > best_approx_impurity:
+                        best_approx_impurity = current_approx_impurity
                         best = current  # copy
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end and current.feature != best.feature:
-            partition_end = end
-            p = start
+        if best.pos < end:
+            if current.feature != best.feature:
+                partition_end = end
+                p = start
 
-            while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
-                    p += 1
+                while p < partition_end:
+                    if X[X_sample_stride * samples[p] +
+                         X_fx_stride * best.feature] <= best.threshold:
+                        p += 1
 
-                else:
-                    partition_end -= 1
+                    else:
+                        partition_end -= 1
 
-                    tmp = samples[partition_end]
-                    samples[partition_end] = samples[p]
-                    samples[p] = tmp
+                        tmp = samples[partition_end]
+                        samples[partition_end] = samples[p]
+                        samples[p] = tmp
+
+
+            self.criterion.reset()
+            self.criterion.update(best.pos)
+            best.improvement = self.criterion.impurity_improvement(impurity)
+            self.criterion.children_impurity(&best.impurity_left,
+                                             &best.impurity_right)
 
         # Respect invariant for constant features: the original order of
         # element in features[:n_known_constants] must be preserved for sibling
@@ -1880,6 +1882,8 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
+        cdef double current_approx_impurity = - INFINITY
+        cdef double best_approx_impurity = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p
@@ -1998,11 +2002,10 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current.improvement = self.criterion.impurity_improvement(impurity)
+                            current_approx_impurity = self.criterion.approx_impurity_improvement()
 
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
+                            if current_approx_impurity > best_approx_impurity:
+                                best_approx_impurity = current_approx_impurity
 
                                 current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
                                 if current.threshold == Xf[p]:
@@ -2026,6 +2029,12 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
                     tmp = samples[partition_end]
                     samples[partition_end] = samples[p]
                     samples[p] = tmp
+
+            self.criterion.reset()
+            self.criterion.update(best.pos)
+            best.improvement = self.criterion.impurity_improvement(impurity)
+            self.criterion.children_impurity(&best.impurity_left,
+                                             &best.impurity_right)
 
         # Reset sample mask
         for p in range(start, end):
@@ -2402,6 +2411,8 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
 
         cdef SplitRecord best, current
         _init_split(&best, end)
+        cdef double current_approx_impurity = - INFINITY
+        cdef double best_approx_impurity = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -2548,10 +2559,10 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current.improvement = self.criterion.impurity_improvement(impurity)
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
+                            current_approx_impurity = self.criterion.approx_impurity_improvement()
+
+                            if current_approx_impurity > best_approx_impurity:
+                                best_approx_impurity = current_approx_impurity
 
                                 current.threshold = (Xf[p_prev] + Xf[p]) / 2.0
                                 if current.threshold == Xf[p]:
@@ -2566,6 +2577,12 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
 
             self._partition(best.threshold, end_negative, start_positive,
                             best.pos)
+
+            self.criterion.reset()
+            self.criterion.update(best.pos)
+            best.improvement = self.criterion.impurity_improvement(impurity)
+            self.criterion.children_impurity(&best.impurity_left,
+                                             &best.impurity_right)
 
         # Respect invariant for constant features: the original order of
         # element in features[:n_known_constants] must be preserved for sibling
@@ -2620,6 +2637,8 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
 
         cdef SplitRecord best, current
         _init_split(&best, end)
+        cdef double current_approx_impurity = - INFINITY
+        cdef double best_approx_impurity = - INFINITY
 
         cdef DTYPE_t current_feature_value
 
@@ -2767,20 +2786,30 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current.improvement = self.criterion.impurity_improvement(impurity)
+                    current_approx_impurity = self.criterion.approx_impurity_improvement()
 
-                    if current.improvement > best.improvement:
+                    if current_approx_impurity > best_approx_impurity:
+                        best_approx_impurity = current_approx_impurity
+                        current.improvement = self.criterion.impurity_improvement(impurity)
+
                         self.criterion.children_impurity(&current.impurity_left,
                                                          &current.impurity_right)
                         best = current
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end and current.feature != best.feature:
-            self.extract_nnz(best.feature, &end_negative, &start_positive,
-                             &is_samples_sorted)
+        if best.pos < end:
+            if current.feature != best.feature:
+                self.extract_nnz(best.feature, &end_negative, &start_positive,
+                                 &is_samples_sorted)
 
-            self._partition(best.threshold, end_negative, start_positive,
-                            best.pos)
+                self._partition(best.threshold, end_negative, start_positive,
+                                best.pos)
+
+            self.criterion.reset()
+            self.criterion.update(best.pos)
+            best.improvement = self.criterion.impurity_improvement(impurity)
+            self.criterion.children_impurity(&best.impurity_left,
+                                             &best.impurity_right)
 
         # Respect invariant for constant features: the original order of
         # element in features[:n_known_constants] must be preserved for sibling
