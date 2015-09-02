@@ -1041,6 +1041,11 @@ cdef class FriedmanMSE(MSE):
         improvement = n_left * n_right * diff^2 / (n_left + n_right)
     """
 
+    cdef double approx_impurity_improvement(self) nogil:
+        """Approximate the impurity reduction removing constants for a split"""
+        # parent impurity is not used by this criterion
+        return self.impurity_improvement(0.)
+
     cdef double impurity_improvement(self, double impurity) nogil:
         cdef SIZE_t n_outputs = self.n_outputs
         cdef SIZE_t k
