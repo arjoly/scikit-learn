@@ -197,9 +197,17 @@ cdef class Criterion:
 
         pass
 
-    cdef double approx_impurity_improvement(self) nogil:
-        """Approximate the impurity reduction removing constants for a split"""
+    cdef double proxy_impurity_improvement(self) nogil:
+        """Compute a proxy of the impurity reduction
 
+        This method is used to speed up the search for the best split.
+        It is a proxy quantity such that the split that maximizes this value
+        also maximizes the impurity improvement. It neglects all constant terms
+        of the impurity decrease for a given split.
+
+        The absolute impurity improvement is only computed by the
+        impurity_improvement method once the best split has been found.
+        """
         cdef double impurity_left
         cdef double impurity_right
         self.children_impurity(&impurity_left, &impurity_right)
@@ -945,8 +953,17 @@ cdef class MSE(RegressionCriterion):
 
         return total / n_outputs
 
-    cdef double approx_impurity_improvement(self) nogil:
-        """Approximate the impurity reduction removing constants for a split"""
+    cdef double proxy_impurity_improvement(self) nogil:
+        """Compute a proxy of the impurity reduction
+
+        This method is used to speed up the search for the best split.
+        It is a proxy quantity such that the split that maximizes this value
+        also maximizes the impurity improvement. It neglects all constant terms
+        of the impurity decrease for a given split.
+
+        The absolute impurity improvement is only computed by the
+        impurity_improvement method once the best split has been found.
+        """
         cdef SIZE_t n_outputs = self.n_outputs
 
         cdef double weighted_n_node_samples = self.weighted_n_node_samples
@@ -957,15 +974,15 @@ cdef class MSE(RegressionCriterion):
         cdef double* sum_right = self.sum_right
 
         cdef SIZE_t k
-        cdef double approx_impuriy_left = 0.
-        cdef double approx_impuriy_right = 0.
+        cdef double proxy_impuriy_left = 0.
+        cdef double proxy_impuriy_right = 0.
 
         for k in range(n_outputs):
-            approx_impuriy_left += sum_left[k] * sum_left[k]
-            approx_impuriy_right += sum_right[k] * sum_right[k]
+            proxy_impuriy_left += sum_left[k] * sum_left[k]
+            proxy_impuriy_right += sum_right[k] * sum_right[k]
 
-        return (approx_impuriy_left / weighted_n_left +
-                approx_impuriy_right / weighted_n_right)
+        return (proxy_impuriy_left / weighted_n_left +
+                proxy_impuriy_right / weighted_n_right)
 
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil:
@@ -1041,8 +1058,17 @@ cdef class FriedmanMSE(MSE):
         improvement = n_left * n_right * diff^2 / (n_left + n_right)
     """
 
-    cdef double approx_impurity_improvement(self) nogil:
-        """Approximate the impurity reduction removing constants for a split"""
+    cdef double proxy_impurity_improvement(self) nogil:
+        """Compute a proxy of the impurity reduction
+
+        This method is used to speed up the search for the best split.
+        It is a proxy quantity such that the split that maximizes this value
+        also maximizes the impurity improvement. It neglects all constant terms
+        of the impurity decrease for a given split.
+
+        The absolute impurity improvement is only computed by the
+        impurity_improvement method once the best split has been found.
+        """
         # parent impurity is not used by this criterion
         return self.impurity_improvement(0.)
 
@@ -1435,7 +1461,7 @@ cdef class BestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.approx_impurity_improvement()
+                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
 
                             if current_approx_impurity > best_approx_impurity:
                                 best_approx_impurity = current_approx_impurity
@@ -1759,7 +1785,7 @@ cdef class RandomSplitter(BaseDenseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current_approx_impurity = self.criterion.approx_impurity_improvement()
+                    current_approx_impurity = self.criterion.proxy_impurity_improvement()
 
                     if current_approx_impurity > best_approx_impurity:
                         best_approx_impurity = current_approx_impurity
@@ -2007,7 +2033,7 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.approx_impurity_improvement()
+                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
 
                             if current_approx_impurity > best_approx_impurity:
                                 best_approx_impurity = current_approx_impurity
@@ -2564,7 +2590,7 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.approx_impurity_improvement()
+                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
 
                             if current_approx_impurity > best_approx_impurity:
                                 best_approx_impurity = current_approx_impurity
@@ -2791,7 +2817,7 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current_approx_impurity = self.criterion.approx_impurity_improvement()
+                    current_approx_impurity = self.criterion.proxy_impurity_improvement()
 
                     if current_approx_impurity > best_approx_impurity:
                         best_approx_impurity = current_approx_impurity
