@@ -1069,8 +1069,24 @@ cdef class FriedmanMSE(MSE):
         The absolute impurity improvement is only computed by the
         impurity_improvement method once the best split has been found.
         """
-        # parent impurity is not used by this criterion
-        return self.impurity_improvement(0.)
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t k
+        cdef double* sum_left = self.sum_left
+        cdef double* sum_right = self.sum_right
+        cdef double total_sum_left = 0.0
+        cdef double total_sum_right = 0.0
+        cdef double weighted_n_left = self.weighted_n_left
+        cdef double weighted_n_right = self.weighted_n_right
+        cdef double diff = 0.0
+
+        for k in range(n_outputs):
+            total_sum_left += sum_left[k]
+            total_sum_right += sum_right[k]
+
+        diff = (total_sum_left / weighted_n_left -
+                total_sum_right / weighted_n_right)
+
+        return weighted_n_left * weighted_n_right * diff * diff
 
     cdef double impurity_improvement(self, double impurity) nogil:
         cdef SIZE_t n_outputs = self.n_outputs
