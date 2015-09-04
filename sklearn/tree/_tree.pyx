@@ -862,13 +862,11 @@ cdef class RegressionCriterion(Criterion):
     cdef void reset(self) nogil:
         """Reset the criterion at pos=start."""
         cdef SIZE_t n_bytes = self.n_outputs * sizeof(double)
-
         memset(self.sum_left, 0, n_bytes)
         memcpy(self.sum_right, self.sum_total, n_bytes)
 
         self.weighted_n_left = 0.0
         self.weighted_n_right = self.weighted_n_node_samples
-
         self.pos = self.start
 
     cdef void update(self, SIZE_t new_pos) nogil:
@@ -886,9 +884,9 @@ cdef class RegressionCriterion(Criterion):
         cdef double* sum_right = self.sum_right
         cdef double* sum_total = self.sum_total
 
-        cdef SIZE_t i
-        cdef SIZE_t p
-        cdef SIZE_t k
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t k = 0
         cdef DOUBLE_t w = 1.0
         cdef DOUBLE_t diff_w = 0.0
 
@@ -944,7 +942,7 @@ cdef class MSE(RegressionCriterion):
         cdef double weighted_n_node_samples = self.weighted_n_node_samples
         cdef double mean_total_k = 0.
         cdef double total = 0.0
-        cdef SIZE_t k
+        cdef SIZE_t k = 0
 
         for k in range(n_outputs):
             mean_total_k = sum_total[k] / weighted_n_node_samples
@@ -966,23 +964,22 @@ cdef class MSE(RegressionCriterion):
         """
         cdef SIZE_t n_outputs = self.n_outputs
 
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
         cdef double weighted_n_left = self.weighted_n_left
         cdef double weighted_n_right = self.weighted_n_right
 
         cdef double* sum_left = self.sum_left
         cdef double* sum_right = self.sum_right
 
-        cdef SIZE_t k
-        cdef double proxy_impuriy_left = 0.
-        cdef double proxy_impuriy_right = 0.
+        cdef SIZE_t k = 0
+        cdef double proxy_impurity_left = 0.
+        cdef double proxy_impurity_right = 0.
 
         for k in range(n_outputs):
-            proxy_impuriy_left += sum_left[k] * sum_left[k]
-            proxy_impuriy_right += sum_right[k] * sum_right[k]
+            proxy_impurity_left += sum_left[k] * sum_left[k]
+            proxy_impurity_right += sum_right[k] * sum_right[k]
 
-        return (proxy_impuriy_left / weighted_n_left +
-                proxy_impuriy_right / weighted_n_right)
+        return (proxy_impurity_left / weighted_n_left +
+                proxy_impurity_right / weighted_n_right)
 
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil:
@@ -1012,15 +1009,15 @@ cdef class MSE(RegressionCriterion):
         cdef double mean_left_k = 0.0
         cdef double mean_right_k = 0.0
 
-        cdef SIZE_t i
-        cdef SIZE_t p
-        cdef SIZE_t k
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t k = 0
         cdef DOUBLE_t w = 1.0
         cdef DOUBLE_t diff_w = 0.0
-        cdef DOUBLE_t y_ik, w_y_ik
+        cdef DOUBLE_t y_ik
 
         # Compute squared sum
-        cdef SIZE_t n_bytes = self.n_outputs * sizeof(double)
+        cdef SIZE_t n_bytes = n_outputs * sizeof(double)
         memset(sq_sum_tmp, 0, n_bytes)
 
         for p in range(start, pos):
@@ -1031,9 +1028,7 @@ cdef class MSE(RegressionCriterion):
 
             for k in range(n_outputs):
                 y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
-
-                sq_sum_tmp[k] += w_y_ik * y_ik
+                sq_sum_tmp[k] += w * y_ik * y_ik
 
         # Compute impurity
         for k in range(n_outputs):
@@ -1070,46 +1065,47 @@ cdef class FriedmanMSE(MSE):
         impurity_improvement method once the best split has been found.
         """
         cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t k
         cdef double* sum_left = self.sum_left
         cdef double* sum_right = self.sum_right
-        cdef double total_sum_left = 0.0
-        cdef double total_sum_right = 0.0
         cdef double weighted_n_left = self.weighted_n_left
         cdef double weighted_n_right = self.weighted_n_right
+        cdef double total_sum_left = 0.0
+        cdef double total_sum_right = 0.0
+
+        cdef SIZE_t k = 0
         cdef double diff = 0.0
 
         for k in range(n_outputs):
             total_sum_left += sum_left[k]
             total_sum_right += sum_right[k]
 
-        diff = (total_sum_left / weighted_n_left -
-                total_sum_right / weighted_n_right)
+        diff = (weighted_n_right * total_sum_left -
+                weighted_n_left * total_sum_right)
 
-        return weighted_n_left * weighted_n_right * diff * diff
+        return diff * diff / (weighted_n_left * weighted_n_right)
 
     cdef double impurity_improvement(self, double impurity) nogil:
         cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t k
         cdef double* sum_left = self.sum_left
         cdef double* sum_right = self.sum_right
-        cdef double total_sum_left = 0.0
-        cdef double total_sum_right = 0.0
         cdef double weighted_n_left = self.weighted_n_left
         cdef double weighted_n_right = self.weighted_n_right
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef double total_sum_left = 0.0
+        cdef double total_sum_right = 0.0
+
+        cdef SIZE_t k = 0
         cdef double diff = 0.0
 
         for k in range(n_outputs):
             total_sum_left += sum_left[k]
             total_sum_right += sum_right[k]
 
-        total_sum_left = total_sum_left / n_outputs
-        total_sum_right = total_sum_right / n_outputs
-        diff = ((total_sum_left / weighted_n_left) -
-                (total_sum_right / weighted_n_right))
+        diff = (weighted_n_right * total_sum_left -
+                weighted_n_left * total_sum_right) / n_outputs
 
-        return (weighted_n_left * weighted_n_right * diff * diff /
-                (weighted_n_left + weighted_n_right))
+        return (diff * diff /
+                (weighted_n_left * weighted_n_right * weighted_n_node_samples))
 
 # =============================================================================
 # Splitter
@@ -1361,8 +1357,8 @@ cdef class BestSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
-        cdef double current_approx_impurity = - INFINITY
-        cdef double best_approx_impurity = - INFINITY
+        cdef double current_proxy_improvement = - INFINITY
+        cdef double best_proxy_improvement = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -1477,10 +1473,10 @@ cdef class BestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
+                            current_proxy_improvement = self.criterion.proxy_impurity_improvement()
 
-                            if current_approx_impurity > best_approx_impurity:
-                                best_approx_impurity = current_approx_impurity
+                            if current_proxy_improvement > best_proxy_improvement:
+                                best_proxy_improvement = current_proxy_improvement
                                 current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
 
                                 if current.threshold == Xf[p]:
@@ -1667,8 +1663,8 @@ cdef class RandomSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
-        cdef double current_approx_impurity = - INFINITY
-        cdef double best_approx_impurity = - INFINITY
+        cdef double current_proxy_improvement = - INFINITY
+        cdef double best_proxy_improvement = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -1801,10 +1797,10 @@ cdef class RandomSplitter(BaseDenseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current_approx_impurity = self.criterion.proxy_impurity_improvement()
+                    current_proxy_improvement = self.criterion.proxy_impurity_improvement()
 
-                    if current_approx_impurity > best_approx_impurity:
-                        best_approx_impurity = current_approx_impurity
+                    if current_proxy_improvement > best_proxy_improvement:
+                        best_proxy_improvement = current_proxy_improvement
                         best = current  # copy
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
@@ -1929,8 +1925,8 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SplitRecord best, current
-        cdef double current_approx_impurity = - INFINITY
-        cdef double best_approx_impurity = - INFINITY
+        cdef double current_proxy_improvement = - INFINITY
+        cdef double best_proxy_improvement = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p
@@ -2049,10 +2045,10 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
+                            current_proxy_improvement = self.criterion.proxy_impurity_improvement()
 
-                            if current_approx_impurity > best_approx_impurity:
-                                best_approx_impurity = current_approx_impurity
+                            if current_proxy_improvement > best_proxy_improvement:
+                                best_proxy_improvement = current_proxy_improvement
 
                                 current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
                                 if current.threshold == Xf[p]:
@@ -2458,8 +2454,8 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
 
         cdef SplitRecord best, current
         _init_split(&best, end)
-        cdef double current_approx_impurity = - INFINITY
-        cdef double best_approx_impurity = - INFINITY
+        cdef double current_proxy_improvement = - INFINITY
+        cdef double best_proxy_improvement = - INFINITY
 
         cdef SIZE_t f_i = n_features
         cdef SIZE_t f_j, p, tmp
@@ -2606,10 +2602,10 @@ cdef class BestSparseSplitter(BaseSparseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
 
-                            current_approx_impurity = self.criterion.proxy_impurity_improvement()
+                            current_proxy_improvement = self.criterion.proxy_impurity_improvement()
 
-                            if current_approx_impurity > best_approx_impurity:
-                                best_approx_impurity = current_approx_impurity
+                            if current_proxy_improvement > best_proxy_improvement:
+                                best_proxy_improvement = current_proxy_improvement
 
                                 current.threshold = (Xf[p_prev] + Xf[p]) / 2.0
                                 if current.threshold == Xf[p]:
@@ -2684,8 +2680,8 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
 
         cdef SplitRecord best, current
         _init_split(&best, end)
-        cdef double current_approx_impurity = - INFINITY
-        cdef double best_approx_impurity = - INFINITY
+        cdef double current_proxy_improvement = - INFINITY
+        cdef double best_proxy_improvement = - INFINITY
 
         cdef DTYPE_t current_feature_value
 
@@ -2833,10 +2829,10 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
                             (self.criterion.weighted_n_right < min_weight_leaf)):
                         continue
 
-                    current_approx_impurity = self.criterion.proxy_impurity_improvement()
+                    current_proxy_improvement = self.criterion.proxy_impurity_improvement()
 
-                    if current_approx_impurity > best_approx_impurity:
-                        best_approx_impurity = current_approx_impurity
+                    if current_proxy_improvement > best_proxy_improvement:
+                        best_proxy_improvement = current_proxy_improvement
                         current.improvement = self.criterion.impurity_improvement(impurity)
 
                         self.criterion.children_impurity(&current.impurity_left,
