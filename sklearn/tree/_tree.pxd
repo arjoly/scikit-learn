@@ -201,11 +201,13 @@ cdef class Tree:
 
 
     ####### Pruning ###########################################################
+    #random pruning
     cpdef int random_pruning(self, int version, object coin)
     cdef int df_pruning_v1(self, SIZE_t root, object coin)
     cdef int df_pruning_v2(self, SIZE_t root, object coin)
     cdef int df_pruning_v3(self, SIZE_t root, object coin)
 
+    #L1 based pruning
     cpdef int usage_pruning(self, SIZE_t root, object coef)
     cdef bint is_deletable(self, SIZE_t root, object coef)
     cpdef int usage_init(self, object X, object lil_nodes)

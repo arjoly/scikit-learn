@@ -941,7 +941,7 @@ struct __pyx_opt_args_7sklearn_4tree_5_tree_4Tree_compute_feature_importances {
   PyObject *normalize;
 };
 
-/* "sklearn/tree/_tree.pxd":243
+/* "sklearn/tree/_tree.pxd":245
  *     cdef SIZE_t max_depth           # Maximal tree depth
  * 
  *     cpdef build(self, Tree tree, object X, np.ndarray y,             # <<<<<<<<<<<<<<
@@ -1033,7 +1033,7 @@ struct __pyx_obj_7sklearn_4tree_5_tree_Tree {
 };
 
 
-/* "sklearn/tree/_tree.pxd":228
+/* "sklearn/tree/_tree.pxd":230
  * # =============================================================================
  * 
  * cdef class TreeBuilder:             # <<<<<<<<<<<<<<
@@ -1208,7 +1208,7 @@ struct __pyx_vtabstruct_7sklearn_4tree_5_tree_Tree {
 static struct __pyx_vtabstruct_7sklearn_4tree_5_tree_Tree *__pyx_vtabptr_7sklearn_4tree_5_tree_Tree;
 
 
-/* "sklearn/tree/_tree.pxd":228
+/* "sklearn/tree/_tree.pxd":230
  * # =============================================================================
  * 
  * cdef class TreeBuilder:             # <<<<<<<<<<<<<<
@@ -17893,8 +17893,8 @@ PyMODINIT_FUNC PyInit__gradient_boosting(void)
   __pyx_vtabptr_7sklearn_4tree_5_tree_Splitter = (struct __pyx_vtabstruct_7sklearn_4tree_5_tree_Splitter*)__Pyx_GetVtable(__pyx_ptype_7sklearn_4tree_5_tree_Splitter->tp_dict); if (unlikely(!__pyx_vtabptr_7sklearn_4tree_5_tree_Splitter)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 79; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __pyx_ptype_7sklearn_4tree_5_tree_Tree = __Pyx_ImportType("sklearn.tree._tree", "Tree", sizeof(struct __pyx_obj_7sklearn_4tree_5_tree_Tree), 1); if (unlikely(!__pyx_ptype_7sklearn_4tree_5_tree_Tree)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 157; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   __pyx_vtabptr_7sklearn_4tree_5_tree_Tree = (struct __pyx_vtabstruct_7sklearn_4tree_5_tree_Tree*)__Pyx_GetVtable(__pyx_ptype_7sklearn_4tree_5_tree_Tree->tp_dict); if (unlikely(!__pyx_vtabptr_7sklearn_4tree_5_tree_Tree)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 157; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
-  __pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder = __Pyx_ImportType("sklearn.tree._tree", "TreeBuilder", sizeof(struct __pyx_obj_7sklearn_4tree_5_tree_TreeBuilder), 1); if (unlikely(!__pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 228; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
-  __pyx_vtabptr_7sklearn_4tree_5_tree_TreeBuilder = (struct __pyx_vtabstruct_7sklearn_4tree_5_tree_TreeBuilder*)__Pyx_GetVtable(__pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder->tp_dict); if (unlikely(!__pyx_vtabptr_7sklearn_4tree_5_tree_TreeBuilder)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 228; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder = __Pyx_ImportType("sklearn.tree._tree", "TreeBuilder", sizeof(struct __pyx_obj_7sklearn_4tree_5_tree_TreeBuilder), 1); if (unlikely(!__pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 230; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
+  __pyx_vtabptr_7sklearn_4tree_5_tree_TreeBuilder = (struct __pyx_vtabstruct_7sklearn_4tree_5_tree_TreeBuilder*)__Pyx_GetVtable(__pyx_ptype_7sklearn_4tree_5_tree_TreeBuilder->tp_dict); if (unlikely(!__pyx_vtabptr_7sklearn_4tree_5_tree_TreeBuilder)) {__pyx_filename = __pyx_f[4]; __pyx_lineno = 230; __pyx_clineno = __LINE__; goto __pyx_L1_error;}
   /*--- Variable import code ---*/
   /*--- Function import code ---*/
   /*--- Execution code ---*/

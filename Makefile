@@ -8,6 +8,8 @@ CPPYTHON ?= cython --cplus
 NOSETESTS ?= nosetests
 CTAGS ?= ctags
 
+dev: clean cython inplace
+
 all: clean inplace test
 
 clean-ctags:

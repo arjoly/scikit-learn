@@ -33,6 +33,8 @@ from ..utils import check_array, check_random_state
 from ..linear_model import SGDClassifier
 from ..linear_model import SGDRegressor
 from ..linear_model import LinearRegression
+from ..linear_model import Lasso
+from ..linear_model import LassoCV
 
 from ._tree import Criterion
 from ._tree import Splitter
@@ -322,12 +324,6 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
             The predicted classes, or the predict values.
         """
 
-        # print "Classifier"
-        # print x_std
-        # print mean
-        # print std
-        # print ""
-
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
         if issparse(X) and (X.indices.dtype != np.intc or
                             X.indptr.dtype != np.intc):
@@ -346,8 +342,6 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                              % (self.n_features_, n_features))
 
         proba = self.tree_.predict_options(X, self.l1_clf_, x_std, mean, std)
-        print proba.shape
-        print proba
 
         # Classification
         if isinstance(self, ClassifierMixin):
@@ -365,11 +359,14 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                 return predictions
 
         # Regression
-        else:
+        elif self.l1_clf_ is None:
             if self.n_outputs_ == 1:
                 return proba[:, 0]
             else:
                 return proba[:, :, 0]
+
+        else:
+            return proba
 
 
     @property
@@ -403,7 +400,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
         return self.tree_.random_pruning(version, coin)
 
-    def usage_pruning(self, X, y, alpha = 1.0):
+    def l1_pruning(self, X, y, alpha = 1.0):
         """Excute a post pruning method on a tree
         """
         X = check_array(X, dtype=DTYPE, accept_sparse="csr")
@@ -411,6 +408,10 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
                             X.indptr.dtype != np.intc):
             raise ValueError("No support for np.int64 index based "
                              "sparse matrices")
+
+        # No regularization
+        if alpha == 0:
+            return
 
         # Determine the size of the sparse matrix of nodes
         n_samples, n_features = X.shape
@@ -423,18 +424,9 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.tree_.usage_init(X, lil_nodes)
         csr_nodes = lil_nodes.tocsr()
 
-        # Fit the Linear Model trained with L1 prior as regularizer
-        # if alpha==-1:
-        #     clf = LassoCV(cv=20)
-        # elif alpha==0:
-        #     clf = LinearRegression()
-        # else:
-        #     clf = Lasso(alpha=alpha, max_iter=2000)
         self.instantiate_l1_clf(loss='squared_loss', penalty='l1', alpha=alpha)
         self.l1_clf_.fit(csr_nodes, y)
 
-        # Reducing coeficiant to 1-d array
-        print 'Coef shape {0}'.format(self.l1_clf_.coef_.shape)
         if self.l1_clf_.coef_.ndim > 1:
             coef = np.amax(np.fabs(self.l1_clf_.coef_), axis=0)
         else:
@@ -444,7 +436,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.tree_.usage_pruning(0, coef)
 
     def get_l1_clf(self):
-        """Return the l1 classifier
+        """Return the l1 classifier associated to L1 based pruning
         """
         return self.l1_clf_
 
@@ -697,7 +689,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             return proba
 
     def instantiate_l1_clf(self, loss, penalty, alpha):
-        self.l1_clf_ =  SGDClassifier(loss=loss, penalty=penalty, alpha=alpha)
+        self.l1_clf_ =  SGDClassifier(loss='squared_hinge', penalty=penalty, alpha=alpha)
 
 
 class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
@@ -825,7 +817,11 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
             random_state=random_state)
 
     def instantiate_l1_clf(self, loss, penalty, alpha):
-        self.l1_clf_ = SGDRegressor(loss=loss, penalty=penalty, alpha=alpha)
+        if alpha== -1:
+            self.l1_clf_ = LassoCV()
+        else:
+            self.l1_clf_ = Lasso(alpha=alpha)
+            # self.l1_clf_ = SGDRegressor(loss='squared_loss', penalty=penalty, alpha=alpha)
 
 
 class ExtraTreeClassifier(DecisionTreeClassifier):

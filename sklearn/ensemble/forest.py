@@ -314,11 +314,11 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble,
         for tree in self.estimators_:
             tree.random_pruning(version, proba)
 
-    def usage_pruning(self, X, y, alpha=1.0):
+    def l1_pruning(self, X, y, alpha=1.0):
         """Excute a post pruning method on each tree of the forest
         """
         for tree in self.estimators_:
-            tree.usage_pruning(X, y, alpha)
+            tree.l1_pruning(X, y, alpha)
 
     def add_tree_pointers(self, to_duplicate, mean=0.0, std=0.0):
         """ Add new tree pointers

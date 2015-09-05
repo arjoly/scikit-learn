@@ -18,6 +18,8 @@
 from libc.stdlib cimport calloc, free, realloc, qsort
 
 from libc.string cimport memcpy, memset
+from libc.math cimport isnan
+from libc.math cimport exp
 from libc.math cimport log as ln
 from libc.math cimport sqrt
 from libc.math cimport cos
@@ -29,6 +31,11 @@ import numpy as np
 cimport numpy as np
 np.import_array()
 
+from ..linear_model import SGDClassifier
+from ..linear_model import SGDRegressor
+from ..linear_model import Lasso
+from ..linear_model import LassoCV
+
 from scipy.sparse import issparse, csc_matrix, csr_matrix, lil_matrix
 
 from sklearn.tree._utils cimport Stack, StackRecord
@@ -37,6 +44,7 @@ from sklearn.tree._utils cimport PriorityHeap, PriorityHeapRecord
 from tree_pruning import Desision
 from sklearn.utils import check_array, check_random_state
 
+from sklearn.preprocessing import normalize
 
 cdef extern from "numpy/arrayobject.h":
     object PyArray_NewFromDescr(object subtype, np.dtype descr,
@@ -3216,13 +3224,6 @@ cdef class Tree:
         return node_id
 
 
-
-
-
-
-
-
-
     cpdef np.ndarray predict(self, object X):
         """Predict target for X."""
         out = self._get_value_ndarray().take(self.apply(X),
@@ -3239,6 +3240,7 @@ cdef class Tree:
         else:
             out = self._get_value_ndarray().take(self.apply_options(X, l1_clf, x_std, mean, std),
                                                  axis=0, mode='clip')
+
             if self.n_outputs == 1:
                 out = out.reshape(X.shape[0], self.max_n_classes)
         return out
@@ -3266,13 +3268,6 @@ cdef class Tree:
             else:
                 return self._apply_l1_dense(X, l1_clf, x_std, mean, std)
 
-    def sigmoid(z):
-        if(z<10):
-            return 0
-        elif(z>10):
-            return 1
-        else:
-            return 1.0 / (1.0 + np.exp(-1.0 * z))
 
     cdef inline np.ndarray _apply_l1_dense(self, object X, object l1_clf, object x_std, float mean, float std):
         """Compute the prediction for each sample in X."""
@@ -3295,50 +3290,48 @@ cdef class Tree:
         if l1_clf is None:
             raise ValueError("l1_clf can not be None")
 
+        if not(isinstance(l1_clf, SGDClassifier) or isinstance(l1_clf, SGDRegressor) or isinstance(l1_clf, Lasso) or isinstance(l1_clf, LassoCV)):
+            raise ValueError("l1_clf should be an instance SGDClassifier, SGDRegressor, Lasso or LassoCV")
+
+
         # Extract input
-        cdef np.ndarray X_ndarray = X
-        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
-        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
-        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        coef = l1_clf.coef_
+        if l1_clf.coef_.ndim == 1:
+            coef = np.reshape(l1_clf.coef_, (1, -1))
+        cdef SIZE_t n_classes = coef.shape[0] # Attention n_classes = 1 if the number of class is 2
         cdef SIZE_t n_samples = X.shape[0]
+        cdef DTYPE_t[:,:] x_view = X
+        cdef DOUBLE_t[:,:] l1coef_view = coef
+
+        # print "coef {0}, coef_ {1}, n_classes{2}".format(coef.shape, l1_clf.coef_.shape, n_classes)
 
         # Initialize output
-        cdef SIZE_t n_classes = l1_clf.coef_.shape[0]
-        cdef np.ndarray out = np.zeros((n_samples, n_classes), dtype=np.float32)
-        cdef DTYPE_t* out_ptr = <DTYPE_t*> out.data
-        cdef SIZE_t out_sample_stride = <SIZE_t> out.strides[0] / <SIZE_t> out.itemsize
-        cdef SIZE_t out_fx_stride = <SIZE_t> out.strides[1] / <SIZE_t> out.itemsize
+        cdef np.ndarray out = np.zeros((n_samples, n_classes), dtype=DOUBLE) + l1_clf.intercept_
+        cdef DOUBLE_t[:,:] out_view = out
 
         # Initialize auxiliary data-structure
         cdef Node* node = NULL
         cdef SIZE_t i = 0
-        cdef SIZE_t j = 0
-        cdef DTYPE_t feature_value = 0.
+        cdef SIZE_t nodeid = 0
 
         # Noise in tresholds
         rand = Random ()
         cdef DOUBLE_t feature_std = 0
         cdef DOUBLE_t threshold = 0
-        cdef np.ndarray XSTD_ndarray
-        cdef DTYPE_t* XSTD_ptr
-        cdef SIZE_t XSTD_fx_stride = 0
+        cdef DTYPE_t[:] xstd_view
         if x_std is not None and std != 0:
-            XSTD_ndarray = x_std
-            XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
-            XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+            xstd_view = x_std
 
-        # Usage pruning (L1 regularization)
-        cdef np.ndarray l1_ndarray = check_array(l1_clf.coef_, dtype=X.dtype)
-        cdef DTYPE_t* l1_ptr = <DTYPE_t*> l1_ndarray.data
-        cdef SIZE_t l1_sample_stride = <SIZE_t> l1_clf.coef_.strides[0] / <SIZE_t> l1_clf.coef_.itemsize
-        cdef SIZE_t l1_fx_stride = <SIZE_t> l1_clf.coef_.strides[1] / <SIZE_t> l1_clf.coef_.itemsize
-
+        # cdef np.ndarray bis = np.zeros((n_samples, self.node_count), dtype=DOUBLE)
+        # cdef DOUBLE_t[:,:] bis_view = bis
         with nogil:
             for i in range(n_samples):
                 node = self.nodes
+                nodeid = 0
 
+                # bis_view[i, nodeid] = 1
                 for j in range(n_classes):
-                    out_ptr[out_sample_stride * i + out_fx_stride * j] += l1_ptr[l1_sample_stride * j + l1_fx_stride * (<SIZE_t>(node - self.nodes))] * X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+                    out_view[i,j] += l1coef_view[j,nodeid]
 
                 # While node not a leaf
                 while node.left_child != _TREE_LEAF:
@@ -3347,73 +3340,36 @@ cdef class Tree:
                     # Compute new threshold with noise
                     threshold = node.threshold
                     if x_std is not None and std != 0:
-                        feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
+                        feature_std = xstd_view[node.feature] * std
                         threshold = threshold + rand.next_gaussian(mean, feature_std)
 
-                    if X_ptr[X_sample_stride * i +
-                             X_fx_stride * node.feature] <= threshold:
+                    if x_view[i,node.feature] <= threshold:
+                        nodeid = node.left_child
                         node = &self.nodes[node.left_child]
                     else:
+                        nodeid = node.right_child
                         node = &self.nodes[node.right_child]
 
+                    # bis_view[i, nodeid] = 1
                     for j in range(n_classes):
-                        out_ptr[out_sample_stride * i + out_fx_stride * j] += l1_ptr[l1_sample_stride * j + l1_fx_stride * (<SIZE_t>(node - self.nodes))] * X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+                        out_view[i,j] += l1coef_view[j,nodeid]
 
-        out = out + l1_clf.intercept_
+        if isinstance(l1_clf, SGDClassifier):
+            out *= -1
+            np.exp(out, out)
+            out += 1
+            np.reciprocal(out, out)
+            if n_classes == 1:
+                out = out[:,0]
+                out = np.vstack([1 - out, out]).T
+            else:
+                # OvR normalization, like LibLinear's predict_probability
+                out = normalize(out, norm='l1')
 
-        out *= -1
-        np.exp(out, out)
-        out += 1
-        np.reciprocal(out, out)
-        if n_classes == 1:
-            return np.vstack([1 - out, out]).T
-        else:
-            # OvR normalization, like LibLinear's predict_probability
-            out /= out.sum(axis=1).reshape((out.shape[0], -1))
         return out
 
     cdef inline np.ndarray _apply_l1_sparse_csr(self, object X, object l1_clf, object x_std, float mean, float std):
         raise NotImplementedError('The use of csr matrix with L1 norm regularization is not yet implemented')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     cdef inline np.ndarray _apply_dense(self, object X, object x_std, float mean, float std):
@@ -3435,15 +3391,12 @@ cdef class Tree:
             raise ValueError("x_std.dtype should be np.float32")
 
         # Extract input
-        cdef np.ndarray X_ndarray = X
-        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
-        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
-        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        cdef DTYPE_t[:,:] x_view = X
         cdef SIZE_t n_samples = X.shape[0]
 
         # Initialize output
         cdef np.ndarray[SIZE_t] out = np.zeros((n_samples,), dtype=np.intp)
-        cdef SIZE_t* out_ptr = <SIZE_t*> out.data
+        cdef SIZE_t[:] out_view = out
 
         # Initialize auxiliary data-structure
         cdef Node* node = NULL
@@ -3454,13 +3407,9 @@ cdef class Tree:
         rand = Random ()
         cdef DOUBLE_t feature_std = 0
         cdef DOUBLE_t threshold = 0
-        cdef np.ndarray XSTD_ndarray
-        cdef DTYPE_t* XSTD_ptr
-        cdef SIZE_t XSTD_fx_stride = 0
+        cdef DTYPE_t[:] xstd_view
         if x_std is not None and std != 0:
-            XSTD_ndarray = x_std
-            XSTD_ptr = <DTYPE_t*> XSTD_ndarray.data
-            XSTD_fx_stride = <SIZE_t> x_std.strides[0] / <SIZE_t> x_std.itemsize
+            xstd_view = x_std
 
         with nogil:
             for i in range(n_samples):
@@ -3473,30 +3422,31 @@ cdef class Tree:
                     # Compute new threshold with noise
                     threshold = node.threshold
                     if x_std is not None and std != 0:
-                        feature_std = XSTD_ptr[XSTD_fx_stride * node.feature] * std
+                        feature_std = xstd_view[node.feature] * std
                         threshold = threshold + rand.next_gaussian(mean, feature_std)
 
-                    if X_ptr[X_sample_stride * i +
-                             X_fx_stride * node.feature] <= threshold:
+                    if x_view[i,node.feature] <= threshold:
                         node = &self.nodes[node.left_child]
                     else:
                         node = &self.nodes[node.right_child]
 
-                # # We no longer have full binary tree.
-                # # A node can have 0, 1 or 2 childs
-                # # Not dealing with additional noise in thresholds
-                # while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
-                #     feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
-                #     if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
-                #         node = &self.nodes[node.left_child]
-                #     elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
-                #         node = &self.nodes[node.right_child]
-                #     else:
-                #         break
+                    # # We no longer have full binary tree.in randrom pruning V2
+                    # # A node can have 0, 1 or 2 childs
+                    # # Not dealing with additional noise in thresholds
+                    # # soulb be adapted to memoryviews
+                    # while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
+                    #     feature_value = X_ptr[X_sample_stride * i + X_fx_stride * node.feature]
+                    #     if node.left_child != _TREE_LEAF and feature_value <= node.threshold:
+                    #         node = &self.nodes[node.left_child]
+                    #     elif node.right_child != _TREE_LEAF and feature_value > node.threshold:
+                    #         node = &self.nodes[node.right_child]
+                    #     else:
+                    #         break
 
-                out_ptr[i] = <SIZE_t>(node - self.nodes)  # node offset
+                out_view[i] = <SIZE_t>(node - self.nodes)  # node offset
 
         return out
+
 
     cdef inline np.ndarray _apply_sparse_csr(self, object X, object x_std, float mean, float std):
         """Finds the terminal region (=leaf node) for each sample in sparse X.
@@ -3561,7 +3511,6 @@ cdef class Tree:
         safe_realloc(&X_sample, n_features * sizeof(DTYPE_t))
         safe_realloc(&feature_to_sample, n_features * sizeof(SIZE_t))
 
-        noise = Desision ()
         with nogil:
             memset(feature_to_sample, -1, n_features * sizeof(SIZE_t))
 
@@ -3593,7 +3542,7 @@ cdef class Tree:
                     else:
                         node = &self.nodes[node.right_child]
 
-                # # We no longer have full binary tree.
+                # # We no longer have full binary tree.in randrom pruning V2
                 # # A node can have 0, 1 or 2 childs
                 # # Not dealing with additional noise in thresholds
                 # while node.left_child != _TREE_LEAF or node.right_child != _TREE_LEAF:
@@ -3693,7 +3642,7 @@ cdef class Tree:
 
 
     ###########################################################################
-    ####### Usage Pruning #####################################################
+    ####### L1 Pruning #####################################################
     ###########################################################################
     cpdef int usage_pruning(self, SIZE_t root, object coef):
         cdef Node* node = &self.nodes[root]
@@ -3756,11 +3705,11 @@ cdef class Tree:
             node = self.nodes
             nodeid = 0
 
+            lil_nodes[i, nodeid] = 1 # Update the csr node matrix
+
             # While node not a leaf
             while node.left_child != _TREE_LEAF:
                 # ... and node.right_child != _TREE_LEAF:
-
-                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
 
                 if X_ptr[X_sample_stride * i +
                          X_fx_stride * node.feature] <= node.threshold:
@@ -3769,6 +3718,8 @@ cdef class Tree:
                 else:
                     nodeid = node.right_child
                     node = &self.nodes[node.right_child]
+
+                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
 
         return 1
 
@@ -3816,6 +3767,8 @@ cdef class Tree:
             node = self.nodes
             nodeid = 0
 
+            lil_nodes[i, nodeid] = 1 # Update the csr node matrix
+
             for k in range(X_indptr[i], X_indptr[i + 1]):
                 feature_to_sample[X_indices[k]] = i
                 X_sample[X_indices[k]] = X_data[k]
@@ -3823,8 +3776,6 @@ cdef class Tree:
             # While node not a leaf
             while node.left_child != _TREE_LEAF:
                 # ... and node.right_child != _TREE_LEAF:
-
-                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
 
                 if feature_to_sample[node.feature] == i:
                     feature_value = X_sample[node.feature]
@@ -3838,6 +3789,8 @@ cdef class Tree:
                 else:
                     nodeid = node.right_child
                     node = &self.nodes[node.right_child]
+
+                lil_nodes[i, nodeid] = 1 # Update the csr node matrix
 
         # Free auxiliary arrays
         free(X_sample)
@@ -3893,18 +3846,19 @@ cdef class Tree:
 
     cdef int df_pruning_v2(self, SIZE_t root, object coin):
         """Depth first path. Version 2"""
-        cdef Node* node = &self.nodes[root]
-        if coin.flip():
-            if coin.flip(proba=0.5):
-                node.left_child = _TREE_LEAF
-            else:
-                node.right_child = _TREE_LEAF
+        raise ValueError("Use of random pruning version 2 is not allowed")
+        # cdef Node* node = &self.nodes[root]
+        # if coin.flip():
+        #     if coin.flip(proba=0.5):
+        #         node.left_child = _TREE_LEAF
+        #     else:
+        #         node.right_child = _TREE_LEAF
 
-        if node.left_child != _TREE_LEAF:
-            self.df_pruning_v2(node.left_child, coin)
-        if node.right_child != _TREE_LEAF:
-            self.df_pruning_v2(node.right_child, coin)
-        return 1
+        # if node.left_child != _TREE_LEAF:
+        #     self.df_pruning_v2(node.left_child, coin)
+        # if node.right_child != _TREE_LEAF:
+        #     self.df_pruning_v2(node.right_child, coin)
+        # return 1
 
 
     cdef int df_pruning_v3(self, SIZE_t root, object coin):
@@ -3925,28 +3879,6 @@ cdef class Tree:
             else:
                 self.df_pruning_v3(node.left_child, coin)
                 self.df_pruning_v3(node.right_child, coin)
-
-        # cdef Node* node = &self.nodes[root]
-        # if coin.flip():
-        #     if coin.flip(proba=0.5):
-        #         if not node.right_child == _TREE_LEAF:
-        #             self.df_pruning_v3(node.right_child, coin)
-        #         if not node.left_child == _TREE_LEAF:
-        #             node = &self.nodes[node.left_child]
-        #             node.left_child = _TREE_LEAF
-        #             node.right_child = _TREE_LEAF
-        #     else:
-        #         if not node.left_child == _TREE_LEAF:
-        #             self.df_pruning_v3(node.left_child, coin)
-        #         if not node.right_child == _TREE_LEAF:
-        #             node = &self.nodes[node.right_child]
-        #             node.left_child = _TREE_LEAF
-        #             node.right_child = _TREE_LEAF
-        # else:
-        #     if not node.left_child == _TREE_LEAF:
-        #         self.df_pruning_v3(node.left_child, coin)
-        #     if not node.right_child == _TREE_LEAF:
-        #         self.df_pruning_v3(node.right_child, coin)
         return 1
 
 
